@@ -9,8 +9,8 @@ import { updateSala, getSalaById } from './models/sala.model.js';
 import { FRONTEND_URLS, TOKEN_SECRET } from './config.js';
 
 pool.connect()
-    .then(() => console.log("✅ Conectado exitosamente a la base de datos"))
-    .catch(err => console.error("❌ Error conectando a la base de datos", err.stack));
+    .then(() => console.log("DB connected successfully"))
+    .catch(err => console.error("Error connecting to DB", err.stack));
 
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
@@ -57,7 +57,8 @@ const salasActivas = new Map();
 
 io.on('connection', (socket) => {
     console.log('🟢 Nuevo cliente conectado:', socket.id);
-    socket.on('unirseSala', async ({ salaId, usuario }) => {
+    // Accept optional ack callback: socket.emit('unirseSala', payload, (ack) => { ... })
+    socket.on('unirseSala', async ({ salaId, usuario } = {}, callback) => {
         try {
             const salaIdNormalizado = parseInt(salaId, 10);
             if (isNaN(salaIdNormalizado)) {
@@ -67,7 +68,9 @@ io.on('connection', (socket) => {
             }
             socket.join(`sala_${salaIdNormalizado}`);
             socket.salaId = salaIdNormalizado;
-            socket.usuario = usuario;            
+            // Resolve usuario: prefer payload, then socket.user (from JWT), fill defaults
+            const resolvedUsuario = Object.assign({ id: null, name: 'guest', email: null }, socket.user || {}, usuario || {});
+            socket.usuario = resolvedUsuario;
             // Usar salaId normalizado en todas las operaciones
             if (!salasActivas.has(salaIdNormalizado)) {
                 salasActivas.set(salaIdNormalizado, {
@@ -77,23 +80,32 @@ io.on('connection', (socket) => {
                 });
             }
             const sala = salasActivas.get(salaIdNormalizado);
-            sala.usuarios.set(socket.id, { ...usuario, socketId: socket.id });
+            sala.usuarios.set(socket.id, { ...resolvedUsuario, socketId: socket.id });
             const clientesSocketIO = io.sockets.adapter.rooms.get(`sala_${salaIdNormalizado}`);
-            console.log(`📍 ESTADO DE SALA ${salaIdNormalizado}:`);
-            console.log(`   👥 Usuarios en memoria: ${sala.usuarios.size}`);
-            console.log(`   🔌 Clientes Socket.IO: ${clientesSocketIO ? clientesSocketIO.size : 0}`);
-            
-            sala.usuarios.forEach((user, socketId) => {
-                console.log(`      - ${user.name} (${user.isInvited ? 'INVITADO' : 'PROPIETARIO'}) - Socket: ${socketId}`);
-            });
+                    console.log(`Room state for sala ${salaIdNormalizado}:`);
+                    console.log(`   users in memory: ${sala.usuarios.size}`);
+                    console.log(`   socket.io clients in room: ${clientesSocketIO ? clientesSocketIO.size : 0}`);
+
+                    sala.usuarios.forEach((user, socketId) => {
+                        console.log(`      - ${user.name} (${user.isInvited ? 'invited' : 'owner'}) - socket: ${socketId}`);
+                    });
             
             socket.to(`sala_${salaIdNormalizado}`).emit('usuarioUnido', { 
-                usuario: usuario,
+                usuario: resolvedUsuario,
                 timestamp: Date.now()
             });
+
+            // If client provided an ack callback, confirm join
+            try {
+                if (typeof callback === 'function') {
+                    callback({ ok: true, salaId: salaIdNormalizado, usuarios: Array.from(sala.usuarios.values()) });
+                }
+            } catch (err) {
+                console.warn('unirseSala: ack callback failed', err);
+            }
             
             try {
-                console.log(`🔍 Socket: Cargando estado para sala ID: ${salaIdNormalizado}`);
+                console.log(`Socket: loading state for sala ID: ${salaIdNormalizado}`);
                 const salaData = await getSalaById(salaIdNormalizado);
                 if (salaData && salaData.length > 0 && salaData[0].xml) {
                     const estadoInicial = JSON.parse(salaData[0].xml);
@@ -101,7 +113,7 @@ io.on('connection', (socket) => {
                     
                     socket.emit('xmlActualizado', {
                         nuevoEstado: estadoInicial,
-                        message: 'Sincronizando con pizarra actual',
+                        message: 'synchronizing with current board',
                         timestamp: new Date(),
                         source: 'initial_sync'
                     });
@@ -137,7 +149,7 @@ io.on('connection', (socket) => {
             }
             // Accept usuario if it has at least a name, email or id
             if (!usuario || !(usuario.name || usuario.email || usuario.id)) {
-                console.warn('❌ Usuario inválido en cambioInstantaneo:', usuario);
+                console.warn('❌ Usuario inválido en cambioInstantaneo - payloadUsuario:', payloadUsuario, ' socket.usuario:', socket.usuario, ' socket.user:', socket.user);
                 socket.emit('errorSincronizacion', { message: 'Usuario inválido para sincronizar cambio' });
                 return;
             }
@@ -169,7 +181,7 @@ io.on('connection', (socket) => {
                 return;
             }
             if (!usuario2 || !(usuario2.name || usuario2.email || usuario2.id)) {
-                console.warn('❌ Usuario inválido en operacionElemento:', usuario2);
+                console.warn('❌ Usuario inválido en operacionElemento - payloadUsuario2:', payloadUsuario2, ' socket.usuario:', socket.usuario, ' socket.user:', socket.user);
                 socket.emit('errorSincronizacion', { message: 'Usuario inválido para operación elemento' });
                 return;
             }
@@ -261,7 +273,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         try {
-            console.log('🔴 Cliente desconectado:', socket.id);
+            console.log('Socket client disconnected:', socket.id);
             if (socket.salaId && socket.usuario) {
                 const sala = salasActivas.get(socket.salaId);
                 if (sala) {
@@ -270,7 +282,7 @@ io.on('connection', (socket) => {
                         usuarioId: socket.usuario.id 
                     });
                     if (sala.usuarios.size === 0) {
-                        console.log(`🗑️ Limpiando sala vacía ${socket.salaId}`);
+                        console.log(`Cleaning empty room ${socket.salaId}`);
                         salasActivas.delete(socket.salaId);
                     }
                 }
@@ -288,5 +300,5 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 8083;
 server.listen(PORT, () => {
-    console.log(`🚀 Servidor Express + Socket.IO corriendo en puerto ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });

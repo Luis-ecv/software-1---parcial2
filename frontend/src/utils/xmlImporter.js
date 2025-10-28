@@ -4,8 +4,11 @@ export const processXml = (xmlText) => {
   
     // Procesar nodos (clases UML)
     const nodes = Array.from(xmlDoc.querySelectorAll('packagedElement[xmi\\:type="uml:Class"]')).map((cls, index) => {
-      const id = `node-${Date.now()}-${index}`; // Generar un ID único
-      const className = cls.getAttribute("name");
+      // Preferir el identificador XMI original si está presente (xmi:id).
+      // Esto permite mapear correctamente las relaciones (memberEnd) a los nodos.
+      const xmlId = cls.getAttribute('xmi:id') || cls.getAttribute('id') || `${Date.now()}-${index}`;
+      const id = `node-${xmlId}`; // Usar xmlId para generar un id consistente y reproducible
+      const className = cls.getAttribute("name") || `Clase${index + 1}`;
   
       // Procesar atributos
       const attributes = Array.from(cls.getElementsByTagName("ownedAttribute")).map((attr) => {
@@ -38,14 +41,18 @@ export const processXml = (xmlText) => {
   
     // Procesar relaciones (aristas UML)
     const edges = Array.from(xmlDoc.querySelectorAll('packagedElement[xmi\\:type="uml:Association"]')).map((assoc, index) => {
-      const [sourceId, targetId] = Array.from(assoc.getElementsByTagName("memberEnd")).map((end) =>
-        nodes.find((node) => node.id.includes(end.getAttribute("xmi:id")))?.id
-      );
-  
-      if (!sourceId || !targetId) return null;
-  
+      // memberEnd references xmi:id de los elementos participantes
+      const memberEnds = Array.from(assoc.getElementsByTagName('memberEnd')).map(end => end.getAttribute('xmi:id') || end.getAttribute('id'));
+
+      // Mapear los memberEnd al id generado en nodes: `node-${xmlId}`
+      const mapped = memberEnds.map(meId => meId ? `node-${meId}` : null).filter(Boolean);
+
+      if (mapped.length < 2) return null;
+
+      const [sourceId, targetId] = mapped;
+
       return {
-        id: `edge-${index}`,
+        id: `edge-${Date.now()}-${index}`,
         source: sourceId,
         target: targetId,
         type: "umlEdge",

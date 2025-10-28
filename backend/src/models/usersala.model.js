@@ -35,7 +35,7 @@ export const getUserSalas = async (userId) => {
 };
 
 export const getUsersBySala = async (salaId) => {
-    console.log(`👥 DB: Buscando usuarios en sala ${salaId}`);
+    console.log(`DB: fetching users in sala ${salaId}`);
     const result = await pool.query(
         `SELECT u.id as userId, u.name, u.email, us.id as userSalaId
          FROM "Usersala" us
@@ -43,7 +43,7 @@ export const getUsersBySala = async (salaId) => {
          WHERE us.salas_id = $1`,
         [salaId]
     );
-    console.log(`👥 DB: Encontrados ${result.rows.length} usuarios en sala ${salaId}`);
+    console.log(`DB: found ${result.rows.length} users in sala ${salaId}`);
     return result.rows;
 };
 

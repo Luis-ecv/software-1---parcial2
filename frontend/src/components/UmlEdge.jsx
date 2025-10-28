@@ -134,19 +134,16 @@ const UmlEdge = ({
   if (isAssociationConnection) {
     const associationStyle = {
       ...style,
-      stroke: '#dc2626', // Rojo más visible para debugging
-      strokeWidth: 3, // Más grueso para ser visible
-      strokeDasharray: '8,4', // Patrón más visible
+      stroke: '#dc2626',
+      strokeWidth: 3,
+      strokeDasharray: '8,4',
       pointerEvents: 'none',
-      opacity: 1, // Totalmente opaco
+      opacity: 1,
       zIndex: 1000
     };
-    
-    console.log('🔗 Renderizando línea de asociación:', { id, edgePath, style: associationStyle });
-    
+
     return (
       <>
-        {/* Edge visual principal para conexión de asociación */}
         <BaseEdge
           id={id}
           path={edgePath}
@@ -154,8 +151,6 @@ const UmlEdge = ({
           markerEnd="none"
           markerStart="none"
         />
-        
-        {/* Texto indicador para debugging */}
         <EdgeLabelRenderer>
           <div
             style={{

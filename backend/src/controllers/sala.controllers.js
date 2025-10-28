@@ -15,11 +15,11 @@ class SalaController {
         const { title, xml, description } = req.body;
         const { id } = req.params;
         
-        console.log(`🛠️ Controller: Petición de actualización para sala ID: ${id}`);
-        console.log(`🛠️ Controller: Campos recibidos:`, {
-            title: title ? 'SI' : 'NO',
-            xml: xml ? `SI (${xml.length} chars)` : 'NO',
-            description: description ? 'SI' : 'NO'
+        console.log(`Controller: update request for sala ID: ${id}`);
+        console.log(`Controller: received fields:`, {
+            title: title ? 'yes' : 'no',
+            xml: xml ? `yes (${xml.length} chars)` : 'no',
+            description: description ? 'yes' : 'no'
         });
         
         if (!title && !xml && !description) {
@@ -31,13 +31,13 @@ class SalaController {
         }
         
         try {
-            console.log(`🔄 Controller: Intentando actualizar sala ${id} en la base de datos`);
+            console.log(`Controller: attempting to update sala ${id} in DB`);
             
             // 🚀 NUEVO: Pasar la instancia io para broadcast automático
             const io = req.app.get('io');
             const sala = await updateSala(id, title, xml, description, io);
-            console.log(`✅ Controller: Sala ${id} actualizada correctamente`);
-            console.log(`📡 Controller: Broadcast automático realizado a usuarios conectados`);
+            console.log(`Controller: Sala ${id} updated successfully`);
+            console.log(`Controller: broadcast triggered to connected users`);
             
             response(res, 200, {
                 success: true,
@@ -46,7 +46,7 @@ class SalaController {
             });
             
         } catch (error) {
-            console.error(`❌ Controller: Error actualizando sala ${id}:`, error.message);
+        console.error(`Controller: error updating sala ${id}:`, error.message);
             response(res, 500, { 
                 error: true, 
                 message: 'Error interno del servidor al actualizar la sala' 
@@ -56,19 +56,16 @@ class SalaController {
 
     getSalaById = catchedAsync(async (req, res) => {
         const { id } = req.params;
-        console.log(`🔍 Backend: Buscando sala con ID: ${id}`);
+        console.log(`Controller: fetching sala with ID: ${id}`);
         
         const sala = await getSalaById(id);
-        console.log(`📦 Backend: Resultado de DB para ID ${id}:`, sala);
+        console.log(`Controller: db result for sala ${id}: rows=${sala?.length || 0}`);
         
-        // Log del contenido XML (primeros 100 caracteres)
         if (sala && sala.length > 0 && sala[0].xml) {
-            console.log(`📄 Backend: XML para sala ${id} (primeros 100 chars):`, sala[0].xml.substring(0, 100) + '...');
+            console.log(`Controller: XML preview for sala ${id}:`, sala[0].xml.substring(0, 100) + '...');
         } else {
-            console.log(`⚠️ Backend: Sala ${id} sin XML o vacía`);
+            console.log(`Controller: sala ${id} has no XML or is empty`);
         }
-        
-        console.log(`✅ Backend: Enviando respuesta para sala ${id}`);
         response(res, 200, sala);
     });
 

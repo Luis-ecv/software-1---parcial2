@@ -25,6 +25,7 @@ import { generateCode } from '../utils/codeGenerator';
 import { generateCompleteProject } from '../utils/completeProjectGenerator';
 import { verifyUMLDiagramWithAI, validateAICredentials } from '../utils/aiUMLValidator';
 import BurbujaHerramientasDiagrama from '../components/BurbujaHerramientasDiagrama';
+import AiBubble from '../components/AiBubble';
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver';
 
@@ -297,6 +298,62 @@ const BoardPage = () => {
     }
   };
 
+  // Generar proyecto Flutter server-side with payload fallback and client fallback
+  const handleGenerateFlutterProject = async () => {
+    try {
+      if (!nodes.length) {
+        Swal.fire({ icon: 'warning', title: 'Diagrama vacío', text: 'No hay clases en el diagrama para generar el proyecto.' });
+        return;
+      }
+
+      Swal.fire({ title: 'Generando proyecto Flutter (server)...', text: 'Solicitando exportación al backend', allowOutsideClick: false, allowEscapeKey: false, showConfirmButton: false, willOpen: () => Swal.showLoading() });
+
+      const exportUrl = `${import.meta.env.VITE_API_BASE || ''}/apis/crearPagina/exportarFlutter/${boardId}`;
+      const resp = await fetch(exportUrl, { method: 'POST', credentials: 'include' });
+
+      if (!resp.ok) {
+        console.warn('Backend Flutter export by id failed, status:', resp.status);
+        try {
+          const altUrl = `${import.meta.env.VITE_API_BASE || ''}/apis/crearPagina/exportarFlutter`;
+          const altResp = await fetch(altUrl, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ elements: nodes, connections: edges }) });
+          if (altResp.ok) {
+            const altBlob = await altResp.blob();
+            const altFileName = `uml-${boardId}-flutter-from-server.zip`;
+            const { saveAs } = await import('file-saver');
+            saveAs(altBlob, altFileName);
+            Swal.close();
+            Swal.fire({ icon: 'success', title: '✅ Exportado Flutter desde servidor', html: `<p>Archivo: <strong>${altFileName}</strong></p>` });
+            return;
+          }
+          console.warn('Server export with payload also failed, status:', altResp.status);
+        } catch (altErr) {
+          console.warn('Alt server export failed:', altErr);
+        }
+
+        // Backend failed — fall back to client-side generator (not implemented for Flutter)
+        Swal.close();
+        Swal.fire({ icon: 'warning', title: 'Exportación en servidor fallida', text: 'No se pudo generar Flutter en el servidor. Por ahora intenta generar el proyecto Spring Boot o usar export por payload.' });
+        return;
+      }
+
+      const blob = await resp.blob();
+      const contentDisposition = resp.headers.get('content-disposition') || '';
+      let fileName = '';
+      const fileNameMatch = /filename=?"?([^";]+)"?/.exec(contentDisposition);
+      if (fileNameMatch) fileName = fileNameMatch[1];
+      if (!fileName) fileName = `uml-${boardId}-flutter.zip`;
+
+      const { saveAs } = await import('file-saver');
+      saveAs(blob, fileName);
+      Swal.close();
+      Swal.fire({ icon: 'success', title: '✅ ¡Proyecto Flutter descargado!', html: `<div class="text-left"><p>Archivo descargado: <strong>${fileName}</strong></p></div>`, confirmButtonText: 'Perfecto' });
+    } catch (error) {
+      console.error('handleGenerateFlutterProject error:', error);
+      Swal.close();
+      Swal.fire({ icon: 'error', title: 'Error generando proyecto Flutter', text: error.message || String(error) });
+    }
+  };
+
   // Función para exportar a XMI (usando buildExportXML)
   const handleExportXMI = async () => {
     try {
@@ -412,8 +469,136 @@ const BoardPage = () => {
     }
   };
 
+  // Generar colección Postman (v2.1) con endpoints CRUD para cada entidad detectada
+  const handleGeneratePostmanCollection = async () => {
+    try {
+      const validNodes = nodes.filter(node => node.data?.className && node.data.className.trim() !== '');
+      if (!validNodes.length) {
+        Swal.fire({ icon: 'warning', title: 'Diagrama vacío', text: 'No hay clases para generar la colección Postman.' });
+        return;
+      }
+
+      const baseUrlVar = '{{baseUrl}}';
+      const authVar = '{{authToken}}';
+
+      const collection = {
+        info: {
+          name: `UML - ${boardId || 'collection'}`,
+          schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'
+        },
+        item: [],
+        variable: [
+          { key: 'baseUrl', value: import.meta.env.VITE_API_BASE || 'http://localhost:3000' },
+          { key: 'authToken', value: '' }
+        ]
+      };
+
+      const sampleValueForType = (type) => {
+        if (!type) return '';
+        const t = String(type).toLowerCase();
+        if (t.includes('string')) return 'example';
+        if (t.includes('int') || t.includes('long') || t === 'number') return 1;
+        if (t.includes('bool')) return true;
+        if (t.includes('date')) return new Date().toISOString();
+        return 'example';
+      };
+
+      const buildSampleBody = (attributes) => {
+        const obj = {};
+        if (!attributes || !Array.isArray(attributes)) return obj;
+        attributes.forEach(attr => {
+          // attr puede ser 'name: type' o un objeto
+          if (typeof attr === 'string' && attr.includes(':')) {
+            const [rawName, rawType] = attr.split(':').map(s => s.trim());
+            const name = rawName.replace(/^[+\-#]/, '').trim();
+            obj[name] = sampleValueForType(rawType);
+          } else if (typeof attr === 'object' && attr.name) {
+            obj[attr.name] = sampleValueForType(attr.type || 'string');
+          }
+        });
+        return obj;
+      };
+
+      for (const node of validNodes) {
+        const className = node.data.className;
+        const path = `api/${className.toLowerCase()}`;
+        const attributes = node.data.attributes || [];
+        const sampleBody = buildSampleBody(attributes);
+
+        const folder = {
+          name: className,
+          item: []
+        };
+
+        // GET all
+        folder.item.push({
+          name: `GET ${path}`,
+          request: {
+            method: 'GET',
+            header: [ { key: 'Authorization', value: authVar, disabled: false } ],
+            url: { raw: `${baseUrlVar}/${path}`, host: [ baseUrlVar ], path: [ path ] }
+          }
+        });
+
+        // GET by id
+        folder.item.push({
+          name: `GET ${path}/{id}`,
+          request: {
+            method: 'GET',
+            header: [ { key: 'Authorization', value: authVar } ],
+            url: { raw: `${baseUrlVar}/${path}/{{id}}`, host: [ baseUrlVar ], path: [ path, '{{id}}' ] }
+          }
+        });
+
+        // POST
+        folder.item.push({
+          name: `POST ${path}`,
+          request: {
+            method: 'POST',
+            header: [ { key: 'Content-Type', value: 'application/json' }, { key: 'Authorization', value: authVar } ],
+            body: { mode: 'raw', raw: JSON.stringify(sampleBody, null, 2) },
+            url: { raw: `${baseUrlVar}/${path}`, host: [ baseUrlVar ], path: [ path ] }
+          }
+        });
+
+        // PUT
+        folder.item.push({
+          name: `PUT ${path}/{id}`,
+          request: {
+            method: 'PUT',
+            header: [ { key: 'Content-Type', value: 'application/json' }, { key: 'Authorization', value: authVar } ],
+            body: { mode: 'raw', raw: JSON.stringify(sampleBody, null, 2) },
+            url: { raw: `${baseUrlVar}/${path}/{{id}}`, host: [ baseUrlVar ], path: [ path, '{{id}}' ] }
+          }
+        });
+
+        // DELETE
+        folder.item.push({
+          name: `DELETE ${path}/{id}`,
+          request: {
+            method: 'DELETE',
+            header: [ { key: 'Authorization', value: authVar } ],
+            url: { raw: `${baseUrlVar}/${path}/{{id}}`, host: [ baseUrlVar ], path: [ path, '{{id}}' ] }
+          }
+        });
+
+        collection.item.push(folder);
+      }
+
+      const blob = new Blob([JSON.stringify(collection, null, 2)], { type: 'application/json' });
+      const fileName = `postman-collection-uml-${boardId || 'collection'}.json`;
+      saveAs(blob, fileName);
+      Swal.fire({ icon: 'success', title: 'Colección Postman descargada', text: `Archivo: ${fileName}` });
+
+    } catch (err) {
+      console.error('Error generando colección Postman:', err);
+      Swal.fire({ icon: 'error', title: 'Error', text: err.message || String(err) });
+    }
+  };
+
   // Función para generar proyecto completo Spring Boot
   const handleGenerateCompleteProject = async () => {
+    // Try server-side export first (uses saved sala on backend). If that fails, fall back to client-side generator.
     try {
       if (!nodes.length) {
         Swal.fire({
@@ -425,44 +610,97 @@ const BoardPage = () => {
       }
 
       Swal.fire({
-        title: 'Generando proyecto completo...',
-        text: 'Creando proyecto Spring Boot con Maven',
+        title: 'Generando proyecto completo (server)...',
+        text: 'Solicitando exportación al backend',
         allowOutsideClick: false,
         allowEscapeKey: false,
         showConfirmButton: false,
         willOpen: () => Swal.showLoading()
       });
 
-      const projectName = `UMLProject_${boardId}`;
-      const result = await generateCompleteProject(nodes, edges, projectName);
+      // POST to backend endpoint that exports Spring Boot project from sala id
+      const exportUrl = `${import.meta.env.VITE_API_BASE || ''}/apis/crearPagina/exportarSpringBoot/${boardId}`;
+      const resp = await fetch(exportUrl, {
+        method: 'POST',
+        credentials: 'include'
+      });
 
-      Swal.close();
+      if (!resp.ok) {
+        // Try sending current diagram to server endpoint that accepts elements+connections
+        console.warn('Backend export by id failed, status:', resp.status);
+        try {
+          const altUrl = `${import.meta.env.VITE_API_BASE || ''}/apis/crearPagina/exportarSpringBoot`;
+          const altResp = await fetch(altUrl, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ elements: nodes, connections: edges })
+          });
+          if (altResp.ok) {
+            const altBlob = await altResp.blob();
+            const { saveAs } = await import('file-saver');
+            const altFileName = `uml-${boardId}-springboot-from-client.zip`;
+            saveAs(altBlob, altFileName);
+            Swal.close();
+            Swal.fire({ icon: 'success', title: '✅ Exportado desde servidor (con payload)', html: `<p>Archivo: <strong>${altFileName}</strong></p>` });
+            return;
+          }
+          console.warn('Server export with payload also failed, status:', altResp.status);
+        } catch (altErr) {
+          console.warn('Alt server export failed:', altErr);
+        }
 
-      if (result.success) {
+        // Backend failed — fall back to client-side generator
+        Swal.close();
         Swal.fire({
-          icon: 'success',
-          title: '✅ ¡Proyecto generado exitosamente!',
-          html: `
-            <div class="text-left">
-              <p><strong>📦 Archivo:</strong> ${result.fileName}</p>
-              <p><strong>📊 Entidades:</strong> ${result.entities}</p>
-              <p><strong>📁 Archivos totales:</strong> ${result.files}</p>
-              <p><strong>☕ Java:</strong> ${result.details.javaVersion}</p>
-              <p><strong>🚀 Spring Boot:</strong> ${result.details.springBootVersion}</p>
-              <p><strong>🗄️ Base de datos:</strong> ${result.details.database}</p>
-            </div>
-          `,
-          confirmButtonText: 'Excelente'
+          icon: 'warning',
+          title: 'Exportación en servidor fallida',
+          text: 'Se intentará generar el proyecto en el cliente como alternativa.'
         });
+        const projectName = `UMLProject_${boardId}`;
+        await generateCompleteProject(nodes, edges, projectName);
+        return;
       }
 
-    } catch (error) {
+      // Backend responded — expect a zip blob
+      const blob = await resp.blob();
+      const contentDisposition = resp.headers.get('content-disposition') || '';
+      let fileName = '';
+      const fileNameMatch = /filename="?([^";]+)"?/.exec(contentDisposition);
+      if (fileNameMatch) fileName = fileNameMatch[1];
+      if (!fileName) fileName = `uml-${boardId}-springboot.zip`;
+
+      const { saveAs } = await import('file-saver');
+      saveAs(blob, fileName);
+
       Swal.close();
       Swal.fire({
-        icon: 'error',
-        title: 'Error generando proyecto',
-        text: error.message
+        icon: 'success',
+        title: '✅ ¡Proyecto exportado desde servidor!',
+        html: `<div class="text-left"><p>Archivo descargado: <strong>${fileName}</strong></p></div>`,
+        confirmButtonText: 'Perfecto'
       });
+
+    } catch (error) {
+      console.error('handleGenerateCompleteProject error:', error);
+      Swal.close();
+      // Final fallback to client-side generation
+      try {
+        Swal.fire({
+          icon: 'info',
+          title: 'Intentando generación en cliente',
+          text: 'La exportación en servidor falló. Se intentará generar el ZIP en el navegador.'
+        });
+        const projectName = `UMLProject_${boardId}`;
+        await generateCompleteProject(nodes, edges, projectName);
+      } catch (clientErr) {
+        Swal.close();
+        Swal.fire({
+          icon: 'error',
+          title: 'Error generando proyecto',
+          text: clientErr.message || String(clientErr)
+        });
+      }
     }
   };
 
@@ -503,13 +741,27 @@ const BoardPage = () => {
           label: '',
           sourceRole: '',
           targetRole: '',
-          selected: false
+          selected: false,
+          // mark as locally created until server confirms/persists state
+          _localCreated: true
         }
       };
 
-      const updatedEdges = addEdge(newEdge, edges);
-      setEdges(updatedEdges);
-      updateBoardData(updatedEdges, "edges");
+      // Debug log: edge being created locally
+      console.debug('BoardPage:onConnect - creating edge', { newEdge, timestamp: Date.now() });
+
+      // Use functional setter to avoid stale-closure races when multiple updates
+      setEdges((prevEdges) => {
+        const updatedEdges = addEdge(newEdge, prevEdges);
+        console.debug('BoardPage:onConnect - setEdges applied', { prevCount: prevEdges.length, newCount: updatedEdges.length });
+        // Emit the updated edges to the server so other clients receive it
+        try {
+          updateBoardData(updatedEdges, "edges");
+        } catch (err) {
+          console.warn('onConnect: updateBoardData failed', err);
+        }
+        return updatedEdges;
+      });
 
       // Auto-seleccionar el edge recién creado para edición
       setTimeout(() => {
@@ -820,15 +1072,15 @@ const BoardPage = () => {
           {/* Botón de verificación UML con IA */}
           <button
             onClick={handleVerifyDiagramAI}
-            className="btn-primary bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-md hover:from-blue-700 hover:to-purple-700 transition-all duration-200"
+            className="btn-primary bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-md transition-all duration-200"
           >
             Verificar Diagrama
           </button>
 
-          {/* Botón de generación Full Stack */}
+          {/* Botón Postman (genera colección Postman para probar la API) */}
           <button
-            onClick={() => handleGenerateCode(true)}
-            className="btn-secondary bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-2 rounded-md flex items-center gap-2 hover:from-purple-700 hover:to-indigo-700"
+            onClick={() => handleGeneratePostmanCollection()}
+            className="btn-secondary bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-2 rounded-md flex items-center gap-2"
           >
             <svg
               className="w-4 h-4"
@@ -843,13 +1095,13 @@ const BoardPage = () => {
                 d="M12 4v16m8-8H4"
               />
             </svg>
-            Full Stack
+            Postman
           </button>
 
           {/* Botón de generación Full Stack Completo */}
           <button
             onClick={() => handleGenerateCompleteProject()}
-            className="btn-secondary bg-gradient-to-r from-green-600 to-teal-600 text-white px-4 py-2 rounded-md flex items-center gap-2 hover:from-green-700 hover:to-teal-700"
+            className="btn-secondary bg-gradient-to-r from-green-600 to-teal-600 text-white px-4 py-2 rounded-md flex items-center gap-2"
           >
             <svg
               className="w-4 h-4"
@@ -867,8 +1119,39 @@ const BoardPage = () => {
             Full Stack C
           </button>
 
+          {/* Botón de generación Flutter (server-side) */}
+          <button
+            onClick={() => handleGenerateFlutterProject()}
+            className="btn-secondary bg-gradient-to-r from-blue-500 to-sky-600 text-white px-3 py-2 rounded-md flex items-center gap-2"
+            title="Exportar proyecto Flutter desde servidor"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path strokeWidth="1.5" d="M12 2l3 5-3 5-3-5 3-5zM12 22l3-5-3-5-3 5 3 5z" />
+            </svg>
+            Flutter
+          </button>
+
           {/* Usuarios activos */}
           <ActiveUsers users={activeUsers} />
+          {/* Debug: button to dump recent socket events and current edges */}
+          <button
+            onClick={() => {
+              try {
+                const events = typeof getDebugEvents === 'function' ? getDebugEvents() : [];
+                console.debug('BoardPage: Debug events (last):', events);
+                console.debug('BoardPage: Current edges snapshot:', edges);
+                // Also show a quick alert count for convenience
+                // eslint-disable-next-line no-alert
+                alert(`Debug events: ${events.length} • edges: ${edges.length}`);
+              } catch (err) {
+                console.error('BoardPage: failed to get debug events', err);
+              }
+            }}
+            className="px-2 py-1 text-xs bg-gray-100 rounded border ml-2"
+            title="Imprimir eventos de socket recientes en la consola"
+          >
+            Debug Events
+          </button>
         </div>
 
         {/* Lista de participantes */}
@@ -913,6 +1196,15 @@ const BoardPage = () => {
       </div>
       
       {/* Burbuja de herramientas */}
+      <AiBubble
+        boardId={boardId}
+        nodes={nodes}
+        edges={edges}
+        setNodes={setNodes}
+        setEdges={setEdges}
+        updateBoardData={updateBoardData}
+      />
+
       <BurbujaHerramientasDiagrama
         nodes={nodes}
         edges={edges}

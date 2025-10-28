@@ -423,7 +423,7 @@
   }
 
   .btn-primary:hover {
-    background: linear-gradient(135deg, var(--color-primary-hover), var(--color-primary));
+    /* Preserve original background color/gradient on hover to avoid flashing to white */
     transform: translateY(-1px);
     box-shadow: var(--color-shadow-elevated);
   }
@@ -443,7 +443,7 @@
   }
 
   .btn-secondary:hover {
-    background: var(--color-background-tertiary);
+    /* Keep the original background (including gradients) on hover. Only apply subtle lift and optional border highlight. */
     border-color: var(--color-primary);
     transform: translateY(-1px);
   }

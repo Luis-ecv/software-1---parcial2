@@ -76,14 +76,6 @@ const BurbujaHerramientasDiagrama = ({
 
   const eliminarSeleccionados = async () => {
     if (selectedNodeIds.length === 0 && selectedEdgeIds.length === 0) return;
-
-    console.log('🗑️ Eliminando seleccionados:', {
-      selectedNodeIds,
-      selectedEdgeIds,
-      totalNodes: nodes.length,
-      totalEdges: edges.length
-    });
-
     // Filtrar nodos - eliminar los seleccionados
     const newNodes = nodes.filter(node => !selectedNodeIds.includes(node.id));
     
@@ -93,13 +85,6 @@ const BurbujaHerramientasDiagrama = ({
       !selectedNodeIds.includes(edge.source) && 
       !selectedNodeIds.includes(edge.target)
     );
-
-    console.log('📊 Resultado eliminación:', {
-      nodesEliminados: nodes.length - newNodes.length,
-      edgesEliminados: edges.length - newEdges.length,
-      newNodesCount: newNodes.length,
-      newEdgesCount: newEdges.length
-    });
 
     // Actualizar estado local
     setNodes(newNodes);
@@ -157,10 +142,15 @@ const BurbujaHerramientasDiagrama = ({
 
   const limpiarDiagrama = async () => {
     if (nodes.length === 0 && edges.length === 0) return;
-    
-    if (window.confirm('¿Estás seguro de que quieres limpiar todo el diagrama?')) {
+    const localCreatedCount = edges.filter(e => e?.data?._localCreated).length;
+    let msg = '¿Estás seguro de que quieres limpiar todo el diagrama?';
+    if (localCreatedCount > 0) {
+      msg += `\n\nNota: hay ${localCreatedCount} aristas no confirmadas localmente (creadas recientemente). Si limpias, se perderán.`;
+    }
+    if (window.confirm(msg)) {
       setNodes([]);
       setEdges([]);
+      // Call updateBoardData with legacy (nodes, edges) signature - hook is backwards compatible
       await updateBoardData([], []);
       setIsOpen(false);
     }
