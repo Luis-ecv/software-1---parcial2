@@ -110,6 +110,17 @@ Rutas de diagnóstico (dev):
 - `GET /apis/health/db` — health check de BD (dev).
 - `GET /apis/sala/debug/all` — (desarrollo) devuelve todas las salas (útil para debug). Puede removerse en producción.
 
+Exportadores (generación de proyectos):
+- `POST /apis/crearPagina/exportarSpringBoot/:id` — Genera un proyecto Spring Boot a partir de la sala almacenada con el id indicado. Responde con un ZIP (Content-Type: application/zip) que contiene el proyecto Java/Spring Boot listo para descomprimir y ejecutar.
+- `POST /apis/crearPagina/exportarSpringBoot` — Genera un proyecto Spring Boot a partir del payload JSON enviado en el body: `{ elements: [...], connections: [...] }`. Útil cuando el diagrama no está guardado en el servidor.
+- `POST /apis/crearPagina/exportarFlutter/:id` — Genera un proyecto Flutter mínimamente funcional (models, services, pages) a partir de la sala guardada con el id indicado. Responde con un ZIP (Content-Type: application/zip) que contiene la app Flutter generada.
+- `POST /apis/crearPagina/exportarFlutter` — Genera un proyecto Flutter a partir del payload JSON enviado en el body: `{ elements: [...], connections: [...] }`. Responde con un ZIP con la estructura del proyecto.
+
+Notas sobre los endpoints de exportación:
+- Las rutas de exportación intentan primero generar el proyecto desde la sala guardada (cuando se usa `/:id`). Si la sala no existe o la exportación por id falla, el endpoint que acepta el payload (`/exportarSpringBoot` o `/exportarFlutter`) permite enviar el diagrama actual (elementos y conexiones) y recibir el ZIP resultante.
+- Los ZIP contienen un README con instrucciones básicas (ej.: `flutter pub get` / `flutter run` para Flutter, `mvnw` o `mvn` para Spring Boot según el proyecto generado).
+- Asegúrate de que el proceso del servidor tenga permisos de escritura en la ruta temporal configurada (por defecto `C:/Users/Public/Documents/proyectos`) o actualiza la variable `rutaBase` en los controladores si es necesario.
+
 Respuesta estándar de API:
 - Muchos endpoints devuelven JSON con la forma `{ error: boolean, data: ... , message?: string }`.
 
