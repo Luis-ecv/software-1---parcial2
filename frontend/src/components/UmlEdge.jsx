@@ -124,8 +124,18 @@ const UmlEdge = ({
   }
 
   if (!edgePath) return null;
+  // Ensure data is defined
+  data = data || {};
 
-  const edgeType = UML_RELATIONSHIP_TYPES[data?.type || 'Association'];
+  // Resolve relationship type case-insensitively and default to Association
+  const requestedRel = data.type || data.relation || 'Association';
+  let edgeType = UML_RELATIONSHIP_TYPES['Association'];
+  try {
+    const matchKey = Object.keys(UML_RELATIONSHIP_TYPES).find(k => k.toLowerCase() === String(requestedRel).toLowerCase());
+    if (matchKey) edgeType = UML_RELATIONSHIP_TYPES[matchKey];
+  } catch (e) {
+    edgeType = UML_RELATIONSHIP_TYPES['Association'];
+  }
   const isSelected = data?.selected || false;
   const isAssociationConnection = data?.isAssociationConnection || false;
   const isNoteConnection = data?.isNoteConnection || false;

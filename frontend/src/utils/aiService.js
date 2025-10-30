@@ -1,6 +1,8 @@
 // Simple client-side service to call backend AI endpoints
 
-const API_BASE = import.meta.env.VITE_API_BASE || '';
+// Resolve API base URL: prefer explicit VITE_API_BASE, then VITE_WS_URL (common in this repo),
+// finally fall back to localhost:8083 for local dev so frontend doesn't call its own origin.
+const API_BASE = import.meta.env.VITE_API_BASE || import.meta.env.VITE_WS_URL || 'http://localhost:8083';
 
 export async function generateDiagram({ type = 'text', content = '', file = null, salaId = null }) {
   const url = `${API_BASE}/apis/ai/generate-diagram`;
@@ -22,7 +24,11 @@ export async function generateDiagram({ type = 'text', content = '', file = null
 
       if (!resp.ok) {
         const text = await resp.text();
-        throw new Error(`AI server error: ${resp.status} ${text}`);
+        // Try to parse JSON error body if present
+        let parsed = text;
+        try { parsed = JSON.parse(text); } catch (e) { /* keep raw text */ }
+        const errMsg = parsed && parsed.error ? parsed.error : parsed;
+        throw new Error(`AI server error: ${resp.status} ${errMsg}`);
       }
 
       return await resp.json();
@@ -38,7 +44,10 @@ export async function generateDiagram({ type = 'text', content = '', file = null
 
     if (!resp.ok) {
       const text = await resp.text();
-      throw new Error(`AI server error: ${resp.status} ${text}`);
+      let parsed = text;
+      try { parsed = JSON.parse(text); } catch (e) { }
+      const errMsg = parsed && parsed.error ? parsed.error : parsed;
+      throw new Error(`AI server error: ${resp.status} ${errMsg}`);
     }
 
     return await resp.json();
@@ -46,4 +55,26 @@ export async function generateDiagram({ type = 'text', content = '', file = null
     console.error('generateDiagram error', error);
     throw error;
   }
+}
+
+export async function modifyDiagram({ prompt, nodes = [], edges = [], mode = 'merge', dryRun = true } = {}) {
+  const base = API_BASE;
+  const url = `${base.replace(/\/$/, '')}/apis/ai/modify-diagram`;
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, nodes, edges, mode, dryRun }),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`AI server error: ${resp.status} ${text}`);
+      }
+      const json = await resp.json();
+      return json;
+    } catch (err) {
+      console.error('modifyDiagram error', err);
+      throw err;
+    }
 }

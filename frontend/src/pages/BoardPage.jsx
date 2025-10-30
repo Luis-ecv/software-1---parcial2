@@ -1,5 +1,6 @@
 // BoardPage.jsx
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
+import { useNavigate } from 'react-router-dom';
 import {
   Background,
   Controls,
@@ -16,7 +17,6 @@ import {
   edgeTypes,
   defaultEdgeOptions,
 } from '../config/flowConfig';
-import { useState } from 'react';
 import useSocketFlow from '../config/useSocketFlow';
 import LeftSidebar from "../components/control/Sidebar"; 
 import Swal from 'sweetalert2';
@@ -39,12 +39,38 @@ const BoardPage = () => {
     let mounted = true;
     (async () => {
       try {
-        const res = await fetch(`${import.meta.env.VITE_WS_URL || window.location.origin}/apis`, { credentials: 'include' });
+        const apiBase = import.meta.env.VITE_WS_URL || window.location.origin;
+        let res = await fetch(`${apiBase}/apis`, { credentials: 'include' });
         if (!mounted) return;
         if (res.ok) {
-          const data = await res.json();
-          setCurrentUser({ id: data.id, name: data.name, email: data.email });
-          return;
+          const payload = await res.json();
+          // backend responses are wrapped as { error: false, data: ... }
+          const user = payload && payload.data ? payload.data : payload;
+          if (user && (user.id || user.email)) {
+            setCurrentUser({ id: user.id, name: user.name, email: user.email });
+            return;
+          }
+          // unexpected shape
+        }
+
+        // If cookie-based auth failed (no cookie sent), try fallback using token stored in localStorage
+        const fallbackToken = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+        if (fallbackToken) {
+          try {
+            res = await fetch(`${apiBase}/apis`, { headers: { Authorization: `Bearer ${fallbackToken}` }, credentials: 'include' });
+            if (!mounted) return;
+            if (res.ok) {
+              const payload = await res.json();
+              const user = payload && payload.data ? payload.data : payload;
+              if (user && (user.id || user.email)) {
+                setCurrentUser({ id: user.id, name: user.name, email: user.email });
+                return;
+              }
+              // unexpected shape on fallback
+            }
+          } catch (inner) {
+            // ignore fallback error and continue to navigate to login
+          }
         }
       } catch (err) {
         // ignore
@@ -78,9 +104,12 @@ const BoardPage = () => {
     setEditingEdge,
     setSelectedEdge,
     updateBoardData,
+    guardarEstado,
     setNodes,
-    setEdges
+      setEdges
   } = useSocketFlow(boardId, currentUser);
+
+      const navigate = useNavigate();
 
   const ActiveUsers = ({ users }) => (
     <div className="flex flex-wrap gap-2">
@@ -95,6 +124,88 @@ const BoardPage = () => {
       ))}
     </div>
   );
+
+  
+
+  // Owner metadata for this sala (to determine host/owner)
+  const [ownerId, setOwnerId] = useState(null);
+  const [ownerEmail, setOwnerEmail] = useState(null);
+
+  // Fetch sala metadata (owner) so we can determine host reliably
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!boardId) return;
+      try {
+        const res = await fetch(`${import.meta.env.VITE_WS_URL || window.location.origin}/apis/sala/${boardId}`, { credentials: 'include' });
+        if (!mounted) return;
+        if (!res.ok) return; // ignore
+        const payload = await res.json().catch(() => null);
+        const dataRows = payload && payload.data ? payload.data : payload;
+        const row = Array.isArray(dataRows) && dataRows.length > 0 ? dataRows[0] : (dataRows || {});
+        if (row) {
+          // The DB uses userId as owner; try multiple casings
+          if (row.userid !== undefined) setOwnerId(row.userid);
+          else if (row.userId !== undefined) setOwnerId(row.userId);
+          if (row.host !== undefined) setOwnerEmail(row.host);
+        }
+      } catch (err) {
+        console.warn('Failed to fetch sala metadata', err);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [boardId]);
+
+  // Consider user the host if they match ownerId (preferred) or are present in participantes
+  const isHost = (() => {
+    try {
+      if (!currentUser) return false;
+      if (ownerId && String(ownerId) === String(currentUser.id)) return true;
+      if (ownerEmail && currentUser.email && String(ownerEmail) === String(currentUser.email)) return true;
+      if (participantes && Array.isArray(participantes) && currentUser.email && participantes.includes(currentUser.email)) return true;
+      return false;
+    } catch (e) {
+      return false;
+    }
+  })();
+
+  // Track unsaved changes locally (to warn on exit)
+  const [unsaved, setUnsaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const initialLoadRef = useRef(false);
+  const unsavedTimerRef = useRef(null);
+
+  // Debounced marking of unsaved changes. Skip the initial load from server.
+  useEffect(() => {
+    // If we haven't received the initial state yet and nodes/edges now contain data, treat as initial load
+    if (!initialLoadRef.current && ((nodes && nodes.length > 0) || (edges && edges.length > 0))) {
+      initialLoadRef.current = true;
+      setUnsaved(false);
+      return;
+    }
+
+    // After initial load, mark unsaved (debounced)
+    if (unsavedTimerRef.current) clearTimeout(unsavedTimerRef.current);
+    unsavedTimerRef.current = setTimeout(() => {
+      setUnsaved(true);
+    }, 200);
+    return () => {
+      if (unsavedTimerRef.current) clearTimeout(unsavedTimerRef.current);
+    };
+  }, [nodes, edges]);
+
+  // Warn user when trying to close tab/window if there are unsaved changes
+  useEffect(() => {
+    const handler = (e) => {
+      if (unsaved) {
+        e.preventDefault();
+        e.returnValue = 'Hay cambios sin guardar en la pizarra. ¿Seguro que quieres salir?';
+        return 'Hay cambios sin guardar en la pizarra. ¿Seguro que quieres salir?';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [unsaved]);
 
   // Función para verificar diagrama UML con IA
   const handleVerifyDiagramAI = async () => {
@@ -899,6 +1010,8 @@ const BoardPage = () => {
     return () => clearTimeout(timeoutId);
   }, [nodes, edges, setNodes, updateBoardData]);
 
+  
+
   // Función para crear clase de asociación
   const handleCreateAssociationClass = useCallback(async () => {
     if (!selectedEdge) return;
@@ -1045,6 +1158,65 @@ const BoardPage = () => {
 
   }, [selectedEdge, nodes, edges, setNodes, setEdges, updateBoardData]);
 
+  // Editar/Eliminar tablero (usa endpoints backend: PUT /apis/sala/:id y DELETE /apis/sala/:id)
+  
+
+  const handleEditBoard = async () => {
+    try {
+      // Obtener datos actuales del tablero
+      const res = await fetch(`${import.meta.env.VITE_WS_URL || window.location.origin}/apis/sala/${boardId}`, { credentials: 'include' });
+      const data = await res.json().catch(() => ({}));
+      const current = Array.isArray(data) && data.length > 0 ? data[0] : (data || {});
+
+      const currentTitle = current.title || current.description || '';
+      const currentDescription = current.description || '';
+
+      const { value: formValues } = await Swal.fire({
+        title: 'Editar tablero',
+        html:
+          `<input id="swal-input1" class="swal2-input" placeholder="Nombre del tablero" value="${String(currentTitle).replace(/"/g, '&quot;')}">` +
+          `<textarea id="swal-input2" class="swal2-textarea" placeholder="Descripción">${String(currentDescription)}</textarea>`,
+        focusConfirm: false,
+        showCancelButton: true,
+        preConfirm: () => {
+          const title = document.getElementById('swal-input1')?.value || '';
+          const description = document.getElementById('swal-input2')?.value || '';
+          if (!title.trim()) {
+            Swal.showValidationMessage('El nombre del tablero es obligatorio');
+            return null;
+          }
+          return { title, description };
+        }
+      });
+
+      if (!formValues) return;
+
+      Swal.fire({ title: 'Guardando cambios...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+      const putRes = await fetch(`${import.meta.env.VITE_WS_URL || window.location.origin}/apis/sala/${boardId}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: formValues.title, description: formValues.description, updatedAt: new Date() })
+      });
+
+      const putResult = await putRes.json().catch(() => ({}));
+      Swal.close();
+      if (!putRes.ok) {
+        Swal.fire({ icon: 'error', title: 'Error', text: putResult.message || 'No se pudo editar el tablero' });
+        return;
+      }
+
+      Swal.fire({ icon: 'success', title: '¡Tablero actualizado!', timer: 1200, showConfirmButton: false });
+      // Opcional: actualizar lista de participantes/metadatos mostrando nuevo titulo
+    } catch (err) {
+      console.error('handleEditBoard error', err);
+      Swal.fire({ icon: 'error', title: 'Error', text: err.message || String(err) });
+    }
+  };
+
+  
+
   return (
   <div className="flex h-[calc(100vh-4rem)]">
     {/* Sidebar a la izquierda */}
@@ -1077,6 +1249,33 @@ const BoardPage = () => {
             Verificar Diagrama
           </button>
 
+          {/* (Edit/Delete buttons removed) */}
+          <button
+            onClick={async () => {
+              try {
+                setSaving(true);
+                Swal.fire({ title: 'Guardando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+                const resp = await guardarEstado({ nodes, edges });
+                Swal.close();
+                if (resp && resp.success) {
+                  setUnsaved(false);
+                  Swal.fire({ icon: 'success', title: 'Guardado', timer: 1200, showConfirmButton: false });
+                } else {
+                  Swal.fire({ icon: 'error', title: 'Error al guardar', text: (resp && resp.error) ? resp.error : 'Sin respuesta del servidor' });
+                }
+              } catch (err) {
+                console.error('Guardar button error', err);
+                Swal.fire({ icon: 'error', title: 'Error', text: err.message || String(err) });
+              } finally {
+                setSaving(false);
+              }
+            }}
+            disabled={!unsaved || saving}
+            className={`px-3 py-2 rounded-md flex items-center gap-2 ${!unsaved || saving ? 'bg-gray-300 text-gray-700 cursor-not-allowed' : 'bg-green-600 text-white'}`}
+          >
+            {saving ? 'Guardando…' : 'Guardar'}
+          </button>
+
           {/* Botón Postman (genera colección Postman para probar la API) */}
           <button
             onClick={() => handleGeneratePostmanCollection()}
@@ -1101,7 +1300,7 @@ const BoardPage = () => {
           {/* Botón de generación Full Stack Completo */}
           <button
             onClick={() => handleGenerateCompleteProject()}
-            className="btn-secondary bg-gradient-to-r from-green-600 to-teal-600 text-white px-4 py-2 rounded-md flex items-center gap-2"
+            className="btn-secondary bg-gradient-to-r from-blue-500 to-sky-600 text-white px-4 py-2 rounded-md flex items-center gap-2"
           >
             <svg
               className="w-4 h-4"
@@ -1216,6 +1415,8 @@ const BoardPage = () => {
         updateBoardData={updateBoardData}
         userEmail={currentUser?.email}
       />
+
+  {/* Debug panel removed */}
     </div>
   </div>
 );

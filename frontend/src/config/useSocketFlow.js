@@ -30,6 +30,17 @@ export const useSocketFlow = (boardId, currentUser = null, options = {}) => {
   const boardRef = useRef(boardId);
   const lastEventsRef = useRef([]);
 
+  // Debug helper to push events into lastEventsRef from any scope in this hook
+  const pushDebugEvent = useCallback((name, payload) => {
+    try {
+      const max = 30;
+      lastEventsRef.current.push({ name, payload, ts: Date.now() });
+      if (lastEventsRef.current.length > max) lastEventsRef.current.shift();
+    } catch (e) {
+      // noop
+    }
+  }, []);
+
   const getUsuarioPayload = useCallback(() => ({
     id: currentUser?.id || currentUser?.uid || null,
     name: currentUser?.displayName || currentUser?.name || currentUser?.email || 'guest',
@@ -64,16 +75,7 @@ export const useSocketFlow = (boardId, currentUser = null, options = {}) => {
   useEffect(() => {
     if (!boardId) return;
 
-    // Debug event history to help trace why edges might be cleared
-    const pushDebugEvent = (name, payload) => {
-      try {
-        const max = 30;
-        lastEventsRef.current.push({ name, payload, ts: Date.now() });
-        if (lastEventsRef.current.length > max) lastEventsRef.current.shift();
-      } catch (e) {
-        // noop
-      }
-    };
+    // Debug event history is handled by pushDebugEvent defined at hook scope
 
     // Build auth payload: prefer cookie-based JWT (server reads cookie).
     // If cookie is not present (dev or cross-origin), fall back to token stored in localStorage.
@@ -442,13 +444,50 @@ export const useSocketFlow = (boardId, currentUser = null, options = {}) => {
     }
   }, [nodes, edges, currentUser]);
 
-  const guardarEstado = useCallback(async (estado) => {
+  const guardarEstado = useCallback(async (estado, opts = { timeoutMs: 8000 }) => {
     const socket = socketRef.current;
     try {
-      if (!socket) return;
-      emitSafe('guardarEstado', { salaId: boardRef.current, estado });
+      if (!socket) return { success: false, error: 'socket-not-ready' };
+      const payload = { salaId: boardRef.current, estado };
+
+      // If joined, emit and wait for server ack 'estadoGuardado' targeted to this sala
+      if (joinedRef.current && typeof socket.emit === 'function') {
+        return await new Promise((resolve) => {
+          let resolved = false;
+          const onAck = (ack) => {
+            if (resolved) return;
+            // ack may be a simple { success: true }
+            resolved = true;
+            resolve(ack || { success: true });
+          };
+
+          // Listen once for server ack
+          try {
+            socket.once('estadoGuardado', onAck);
+            socket.emit('guardarEstado', payload);
+          } catch (emitErr) {
+            socket.off('estadoGuardado', onAck);
+            resolved = true;
+            resolve({ success: false, error: emitErr.message });
+            return;
+          }
+
+          // Timeout fallback
+          const to = setTimeout(() => {
+            if (resolved) return;
+            resolved = true;
+            socket.off('estadoGuardado', onAck);
+            resolve({ success: false, error: 'timeout' });
+          }, opts.timeoutMs || 8000);
+        });
+      }
+
+      // Fallback: queue emit for when joined
+      emitSafe('guardarEstado', payload);
+      return { success: true };
     } catch (err) {
       console.error('useSocketFlow: guardarEstado error', err);
+      return { success: false, error: err.message };
     }
   }, []);
 
@@ -586,8 +625,9 @@ export const useSocketFlow = (boardId, currentUser = null, options = {}) => {
     setEditingData,
     setEditingEdge,
     setSelectedEdge,
-    updateBoardData,
-    setNodes,
+  updateBoardData,
+  guardarEstado,
+  setNodes,
     setEdges,
     updateActiveUsers,
     cleanupActiveUser,
