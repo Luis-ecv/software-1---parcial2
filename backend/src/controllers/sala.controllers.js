@@ -31,22 +31,39 @@ class SalaController {
         }
         
         try {
+            console.log(`Controller: checking ownership for sala ${id}`);
+            // Obtener la sala para comprobar propietario
+            const salaRows = await getSalaById(id);
+            if (!salaRows || salaRows.length === 0) {
+                console.log(`Controller: sala ${id} not found when checking ownership`);
+                return response(res, 404, { error: true, message: 'Sala no encontrada' });
+            }
+            const salaRow = salaRows[0];
+            const ownerId = salaRow.userId || salaRow.userid || salaRow.user_id;
+            const requesterId = req.user && req.user.id;
+            if (!requesterId) {
+                return response(res, 401, { error: true, message: 'Unauthorized' });
+            }
+            if (parseInt(ownerId, 10) !== parseInt(requesterId, 10)) {
+                console.log(`Controller: requester ${requesterId} is not owner ${ownerId} - forbidden`);
+                return response(res, 403, { error: true, message: 'No tienes permisos para actualizar esta sala' });
+            }
+
             console.log(`Controller: attempting to update sala ${id} in DB`);
-            
-            // 🚀 NUEVO: Pasar la instancia io para broadcast automático
+            // Pasar la instancia io para broadcast automático
             const io = req.app.get('io');
             const sala = await updateSala(id, title, xml, description, io);
             console.log(`Controller: Sala ${id} updated successfully`);
             console.log(`Controller: broadcast triggered to connected users`);
-            
+
             response(res, 200, {
                 success: true,
                 message: 'Sala actualizada correctamente',
                 data: sala
             });
-            
+
         } catch (error) {
-        console.error(`Controller: error updating sala ${id}:`, error.message);
+            console.error(`Controller: error updating sala ${id}:`, error.message);
             response(res, 500, { 
                 error: true, 
                 message: 'Error interno del servidor al actualizar la sala' 
@@ -80,6 +97,21 @@ class SalaController {
 
     delete = catchedAsync(async (req, res) => {
         const { id } = req.params;
+        // Verificar que quien solicita es el owner
+        const salaRows = await getSalaById(id);
+        if (!salaRows || salaRows.length === 0) {
+            return response(res, 404, { error: true, message: 'Sala no encontrada' });
+        }
+        const salaRow = salaRows[0];
+        const ownerId = salaRow.userId || salaRow.userid || salaRow.user_id;
+        const requesterId = req.user && req.user.id;
+        if (!requesterId) {
+            return response(res, 401, { error: true, message: 'Unauthorized' });
+        }
+        if (parseInt(ownerId, 10) !== parseInt(requesterId, 10)) {
+            return response(res, 403, { error: true, message: 'No tienes permisos para eliminar esta sala' });
+        }
+
         const sala = await deleteSala(id);
         response(res, 200, sala);
     });

@@ -13,7 +13,7 @@ router.route("/")
     .get(authRequired, salaController.getSalas);
 
 router.route("/:id")
-    .put(salaController.update)
+    .put(authRequired, salaController.update)
     .get(salaController.getSalaById)
     .delete(authRequired, salaController.delete);
 

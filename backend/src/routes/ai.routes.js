@@ -69,6 +69,9 @@ const handleMultipleFormats = (req, res, next) => {
 router.post('/generate-diagram', handleMultipleFormats, AIController.generateDiagram);
 router.get('/features', AIController.getAIFeatures);
 
+// Dry-run modify: accepts current nodes/edges + prompt and returns a proposed merged state (does not apply changes)
+router.post('/modify-diagram', handleMultipleFormats, AIController.modifyDiagram);
+
 // Health check for AI service
 router.get('/health', (req, res) => {
     res.json({

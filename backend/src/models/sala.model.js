@@ -1,11 +1,21 @@
 import pool from '../config/db.js';
+import { createUserSala } from './usersala.model.js';
 
 export const createSala = async (title, xml, description, userId) => {
     const result = await pool.query(
         `INSERT INTO "Salas" (title, xml, description, userId) VALUES ($1, $2, $3, $4) RETURNING *`,
         [title, xml, description, userId]
     );
-    return result.rows[0];
+    const sala = result.rows[0];
+    // Intentar añadir al creador como participante en Usersala
+    try {
+        await createUserSala(userId, sala.id);
+        console.log(`DB: creator userId=${userId} added to Usersala for sala ${sala.id}`);
+    } catch (err) {
+        // No detener la creación si la inserción en Usersala falla (por ejemplo por unique constraint)
+        console.warn(`DB: could not insert Usersala for user ${userId} sala ${sala.id}: ${err.message}`);
+    }
+    return sala;
 };
 
 export const getSalaById = async (id) => {

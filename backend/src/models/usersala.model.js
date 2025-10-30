@@ -1,9 +1,10 @@
 import pool from '../config/db.js';
 
 export const createUserSala = async (userId, salas_id) => {
+    // Comprobar existencia específica para la sala y el usuario
     const existingEntry = await pool.query(
-        `SELECT * FROM "Usersala" WHERE userId = $1`,
-        [userId]
+        `SELECT * FROM "Usersala" WHERE userId = $1 AND salas_id = $2`,
+        [userId, salas_id]
     );
     if (existingEntry.rows.length > 0) {
         throw new Error('El usuario ya está asociado a esta sala.');
@@ -39,7 +40,7 @@ export const getUsersBySala = async (salaId) => {
     const result = await pool.query(
         `SELECT u.id as userId, u.name, u.email, us.id as userSalaId
          FROM "Usersala" us
-         JOIN "User" u ON us.userId = u.id
+         JOIN "Users" u ON us.userId = u.id
          WHERE us.salas_id = $1`,
         [salaId]
     );

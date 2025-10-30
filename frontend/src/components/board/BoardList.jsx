@@ -4,8 +4,7 @@ import { useNavigate } from 'react-router-dom';
 const BoardList = ({ boards = [], user, onInvite, onEdit, onDelete }) => {
   const navigate = useNavigate();
 
-  // Debug: show boards in console to help diagnose rendering issues
-  console.debug('BoardList render - boards prop:', boards);
+  // BoardList renders array of board summaries
 
   // Si no hay tableros, mostramos un mensaje "vacío" (proteger contra boards undefined/null)
   if (!Array.isArray(boards) || boards.length === 0) {
@@ -24,7 +23,17 @@ const BoardList = ({ boards = [], user, onInvite, onEdit, onDelete }) => {
       {boards.map((board) => {
         // Normalize single board for display safety
         const b = board || {};
-        const isHost = (b.host && user && (String(b.host) === String(user.email) || String(b.host) === String(user.id))) || false;
+  // Determine owner id/email from possible backend shapes (userId, userid, host)
+  const rawHost = b.host ?? null;
+  // If rawHost is numeric (stored userId), treat as ownerId; otherwise as ownerEmail
+  const ownerId = b.userId ?? b.userid ?? (rawHost !== null && !isNaN(Number(rawHost)) ? rawHost : null);
+  const ownerEmail = (rawHost !== null && isNaN(Number(rawHost))) ? rawHost : null;
+        const isHost = Boolean(
+          user && (
+            (ownerId !== null && String(ownerId) === String(user.id)) ||
+            (ownerEmail !== null && String(ownerEmail) === String(user.email))
+          )
+        );
 
         return (
           <div
@@ -42,7 +51,7 @@ const BoardList = ({ boards = [], user, onInvite, onEdit, onDelete }) => {
                 {b.title || b.description || `Tablero #${b.id ?? 's/contenido'}`}
               </h3>
               <p className="text-sm text-gray-500">
-                Creado por: <span className="font-medium">{b.host || b.userId || b.userid || 'Desconocido'}</span>
+                Creado por: <span className="font-medium">{ownerEmail || ownerId || 'Desconocido'}</span>
               </p>
               {/* Debug: if no title/description, show JSON preview to help debugging */}
               {!(b.title || b.description) && (
@@ -101,37 +110,37 @@ const BoardList = ({ boards = [], user, onInvite, onEdit, onDelete }) => {
                 Ver
               </button>
 
-              {/* Editar y Eliminar: mostrarse siempre, pero deshabilitados si no es host */}
-              <>
-                <button
-                  onClick={() => isHost && onEdit(board)}
-                  disabled={!isHost}
-                  className={`btn-secondary flex items-center px-3 py-2 text-sm ${!isHost ? 'opacity-60 cursor-not-allowed' : ''}`}
-                  title={isHost ? "Editar tablero" : "Solo el propietario puede editar"}
-                >
-                  <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round" 
-                      strokeWidth="2" 
-                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" 
-                    />
-                  </svg>
-                  Editar
-                </button>
+              {/* Editar y Eliminar: solo renderizar si es host */}
+              {isHost && (
+                <>
+                  <button
+                    onClick={() => onEdit(board)}
+                    className={`btn-secondary flex items-center px-3 py-2 text-sm`}
+                    title={"Editar tablero"}
+                  >
+                    <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round" 
+                        strokeWidth="2" 
+                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" 
+                      />
+                    </svg>
+                    Editar
+                  </button>
 
-                <button
-                  onClick={() => isHost && onDelete(board.id)}
-                  disabled={!isHost}
-                  className={`btn-danger flex items-center px-3 py-2 text-sm ${!isHost ? 'opacity-60 cursor-not-allowed' : ''}`}
-                  title={isHost ? "Eliminar tablero" : "Solo el propietario puede eliminar"}
-                >
-                  <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                  Eliminar
-                </button>
-              </>
+                  <button
+                    onClick={() => onDelete(board.id)}
+                    className={`btn-danger flex items-center px-3 py-2 text-sm`}
+                    title={"Eliminar tablero"}
+                  >
+                    <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Eliminar
+                  </button>
+                </>
+              )}
             </div>
           </div>
         );

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+import Ajv from 'ajv';
 
 // Initialize OpenAI client
 // const openai = new OpenAI({
@@ -16,66 +17,213 @@ const __dirname = path.dirname(__filename);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'your_gemini_api_key_here');
 
 
-// System prompt for UML diagram generation
-const SYSTEM_PROMPT = `Eres un experto en diagramas UML de clases. Tu tarea es generar diagramas de clases UML válidos basados en la entrada del usuario.
+// System prompt for UML diagram generation (friendly for novices and experts)
+const SYSTEM_PROMPT = `Eres un asistente que genera diagramas de clases UML en formato JSON para usuarios con distintos niveles de experiencia (desde novatos hasta diseñadores expertos).
 
-IMPORTANTE: Debes responder ÚNICAMENTE con un objeto JSON válido que represente el diagrama UML, sin texto adicional, sin explicaciones, sin markdown.
+OBJETIVO: Producir SÓLO un único objeto JSON válido que siga el esquema descrito (elements, relationships). No incluyas texto explicativo ni markdown en la respuesta.
 
-El formato del JSON debe ser exactamente:
+COMPORTAMIENTO:
+- Si la entrada del usuario contiene suficiente detalle, genera clases (elements) y relaciones (relationships) con atributos, métodos, visibilidades y posiciones.
+- Si falta información importante o la entrada es ambigua, NO inventes suposiciones arriesgadas. En su lugar, incluye un campo opcional "clarifyingQuestions": ["..."], con preguntas cortas y concretas que el frontend pueda presentar al usuario (por ejemplo: "¿La clase Pedido debe tener un atributo cantidad de tipo int?").
+- Para salidas aptas para novatos: genera modelos simples y legibles usando tipos básicos (string, int, bool, Date). Si el tipo es incierto, usa "string" y marca el atributo con "inferred": true para indicar que fue inferido.
+- Para usuarios expertos: si la entrada ya contiene firmas de métodos o tipos detallados, conserva ese nivel de detalle en el JSON.
+- Posiciones: asigna posiciones razonables (separación mínima de ~200px entre clases) para facilitar la colocación en el canvas.
+- IDs: usa cadenas únicas para id.
+
+ESQUEMA RESUMIDO (obligatorio):
 {
-    "elements": [
-        {
-            "id": "unique_id",
-            "type": "class",
-            "name": "ClassName",
-            "attributes": [
-                {
-                    "name": "attributeName",
-                    "type": "dataType",
-                    "visibility": "public|private|protected",
-                    "isPrimaryKey": false
-                }
-            ],
-            "methods": [
-                {
-                    "name": "methodName",
-                    "returnType": "returnType",
-                    "parameters": [
-                        {
-                            "name": "paramName",
-                            "type": "paramType"
-                        }
-                    ],
-                    "visibility": "public|private|protected"
-                }
-            ],
-            "position": {
-                "x": 100,
-                "y": 100
-            }
-        }
-    ],
-    "relationships": [
-        {
-            "id": "rel_unique_id",
-            "type": "inheritance|composition|aggregation|association",
-            "sourceId": "source_class_id",
-            "targetId": "target_class_id",
-            "cardinality": "1:1|1:*|*:1|*:*"
-        }
-    ]
+  "elements": [ { id, type, name, attributes[], methods[], position } ],
+  "relationships": [ { id, type, sourceId, targetId, cardinality } ],
+  optional: "clarifyingQuestions": [string]
 }
 
-Reglas:
-1. Los IDs deben ser únicos
-2. Las posiciones deben distribuirse de manera lógica (separación mínima de 200px)
-3. Los tipos de datos comunes: string, int, boolean, Date, etc.
-4. Visibilidades: public (+), private (-), protected (#)
-5. Tipos de relaciones: inheritance, composition, aggregation, association
-6. Las cardinalidades estándar: "1:1", "1:*", "*:1", "*:*"
-7. NUNCA incluyas texto explicativo, solo el JSON válido`;
+REGLAS IMPORTANTES:
+1) Devuelve SÓLO JSON que cumpla el esquema (sin texto adicional).
+2) Si tienes dudas importantes sobre el modelo, usa "clarifyingQuestions" en lugar de inventar detalles.
+3) Incluye la propiedad "inferred": true en atributos cuyo tipo fue adivinado.
+4) Usa nombres y tipos claros; para tipos desconocidos, default a "string".
+5) No incluyas explicaciones; el frontend manejará la interacción con el usuario si se requieren aclaraciones.`;
+
+// JSON Schema para validar la estructura esperada del diagrama UML
+const DIAGRAM_SCHEMA = {
+    type: 'object',
+    properties: {
+        elements: {
+            type: 'array',
+            items: {
+                type: 'object',
+                required: ['id','type','name'],
+                properties: {
+                    id: { type: 'string' },
+                    type: { type: 'string' },
+                    name: { type: 'string' },
+                    attributes: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                name: { type: 'string' },
+                                type: { type: 'string' },
+                                inferred: { type: 'boolean' },
+                                visibility: { type: 'string' },
+                                isPrimaryKey: { type: 'boolean' }
+                            }
+                        }
+                    },
+                    methods: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                name: { type: 'string' },
+                                returnType: { type: 'string' },
+                                parameters: { type: 'array' },
+                                visibility: { type: 'string' }
+                            }
+                        }
+                    },
+                    position: {
+                        type: 'object',
+                        properties: { x: { type: 'number' }, y: { type: 'number' } }
+                    }
+                }
+            }
+        },
+        relationships: {
+            type: 'array',
+            items: {
+                type: 'object',
+                required: ['id','type','sourceId','targetId'],
+                properties: {
+                    id: { type: 'string' },
+                    type: { type: 'string' },
+                    sourceId: { type: 'string' },
+                    targetId: { type: 'string' },
+                    cardinality: { type: 'string' }
+                }
+            }
+        }
+        ,
+        clarifyingQuestions: {
+            type: 'array',
+            items: { type: 'string' }
+        }
+    }
+};
+
+const ajv = new Ajv({ allErrors: true, strict: false });
+const validateDiagram = ajv.compile(DIAGRAM_SCHEMA);
 
 class AIController {
+    // Modify existing diagram based on a prompt (dry-run by default)
+    static async modifyDiagram(req, res) {
+        try {
+            const { prompt, mode = 'merge', dryRun = true, nodes: curNodes = [], edges: curEdges = [] } = req.body || {};
+
+            if (!prompt || typeof prompt !== 'string') {
+                return res.status(400).json({ success: false, error: 'Se requiere el campo prompt' });
+            }
+
+            // Build a user input that includes the current state and the user's prompt
+            const stateSummary = {
+                elements: Array.isArray(curNodes) ? curNodes.map(n => ({ id: n.id, name: n.data?.className || (n.name || n.data?.name), attributes: n.data?.attributes || [], methods: n.data?.methods || [] })) : [],
+                relationships: Array.isArray(curEdges) ? curEdges.map(e => ({ id: e.id, sourceId: e.source, targetId: e.target, type: e.data?.type || (e.type || 'association') })) : []
+            };
+
+            const userInput = `Estado actual del diagrama (JSON): ${JSON.stringify(stateSummary)}\n\nInstrucción del usuario: ${prompt}\n\nModo: ${mode}. Responde SOLO un JSON con la llave 'elements' y 'relationships' con la modificación propuesta. Si faltan datos, incluye 'clarifyingQuestions'.`;
+
+            // Use existing generation helper to ask the model
+            const aiDiagram = await AIController.generateUMLFromText(userInput);
+
+            // Normalize aiDiagram to arrays
+            if (aiDiagram.elements && !Array.isArray(aiDiagram.elements)) aiDiagram.elements = Object.values(aiDiagram.elements || {});
+            if (!aiDiagram.relationships && aiDiagram.connections) aiDiagram.relationships = Array.isArray(aiDiagram.connections) ? aiDiagram.connections : Object.values(aiDiagram.connections || {});
+            if (aiDiagram.relationships && !Array.isArray(aiDiagram.relationships)) aiDiagram.relationships = Object.values(aiDiagram.relationships || {});
+
+            // Merge strategy: default 'merge' will add new nodes/edges and update existing, but will NOT remove existing nodes/edges
+            const existingNodesMap = new Map((curNodes || []).map(n => [String(n.id), n]));
+            const existingEdgesMap = new Map((curEdges || []).map(e => [String(e.id), e]));
+
+            const addedNodes = [];
+            const updatedNodes = [];
+
+            const resultNodesMap = new Map(existingNodesMap);
+
+            (aiDiagram.elements || []).forEach((el, idx) => {
+                const id = el.id ? String(el.id) : `ai_${Date.now()}_${idx}`;
+                const name = el.name || el.nombre || el.title || `Clase_${idx + 1}`;
+                const attributes = Array.isArray(el.attributes) ? el.attributes : (el.attributes ? [el.attributes] : []);
+                const methods = Array.isArray(el.methods) ? el.methods : (el.methods ? [el.methods] : []);
+
+                if (resultNodesMap.has(id)) {
+                    // update existing
+                    const existing = resultNodesMap.get(id);
+                    const updated = { ...existing, data: { ...(existing.data || {}), className: name, attributes, methods } };
+                    resultNodesMap.set(id, updated);
+                    updatedNodes.push(updated);
+                } else {
+                    // add new node
+                    const nodeObj = { id, type: 'classNode', position: el.position || { x: 100 + idx * 200, y: 100 }, data: { className: name, attributes, methods, _aiSource: true } };
+                    resultNodesMap.set(id, nodeObj);
+                    addedNodes.push(nodeObj);
+                }
+            });
+
+            const addedEdges = [];
+            const updatedEdges = [];
+            const resultEdges = Array.from(curEdges || []);
+
+            (aiDiagram.relationships || []).forEach((r, idx) => {
+                const id = r.id ? String(r.id) : `ai_rel_${Date.now()}_${idx}`;
+                let source = r.sourceId || r.source || null;
+                let target = r.targetId || r.target || null;
+
+                // Try to resolve by name if needed
+                if (source && !resultNodesMap.has(String(source))) {
+                    const found = Array.from(resultNodesMap.values()).find(n => String((n.data && n.data.className || n.name || '')).toLowerCase() === String(source).toLowerCase());
+                    if (found) source = found.id;
+                }
+                if (target && !resultNodesMap.has(String(target))) {
+                    const found = Array.from(resultNodesMap.values()).find(n => String((n.data && n.data.className || n.name || '')).toLowerCase() === String(target).toLowerCase());
+                    if (found) target = found.id;
+                }
+
+                if (!source || !target) return; // skip invalid edge
+
+                // Check if similar edge exists
+                const exists = resultEdges.some(e => e.source === source && e.target === target && ((e.data && e.data.type) || e.type) === (r.type || r.relation || 'association'));
+                if (!exists) {
+                    const edgeObj = { id, source, target, type: 'umlEdge', data: { type: r.type || r.relation || 'association', _aiSource: true } };
+                    resultEdges.push(edgeObj);
+                    addedEdges.push(edgeObj);
+                } else {
+                    // optionally update matching edge metadata - for now skip
+                }
+            });
+
+            const mergedNodes = Array.from(resultNodesMap.values());
+
+            const diff = {
+                addedNodes,
+                updatedNodes,
+                addedEdges
+            };
+
+            const response = {
+                success: true,
+                message: 'Propuesta de modificación generada (modo ' + mode + ')',
+                newState: { nodes: mergedNodes, edges: resultEdges },
+                diff,
+                clarifyingQuestions: aiDiagram.clarifyingQuestions || [],
+                warnings: []
+            };
+
+            return res.json(response);
+        } catch (err) {
+            console.error('modifyDiagram error', err);
+            return res.status(500).json({ success: false, error: err.message || String(err) });
+        }
+    }
     // Generate UML diagram from text, voice, or image
     static async generateDiagram(req, res) {
         try {
@@ -246,6 +394,42 @@ class AIController {
                 }
             }
 
+            // If the model only returned clarifyingQuestions (or no elements), attempt a best-effort generation:
+            // some users prefer to get an initial diagram even if some details are ambiguous.
+            const noElements = !diagram.elements || (Array.isArray(diagram.elements) && diagram.elements.length === 0);
+            if (noElements && Array.isArray(diagram.clarifyingQuestions) && diagram.clarifyingQuestions.length > 0) {
+                try {
+                    const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+                    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+                    // Ask the model for a best-effort diagram: infer reasonable defaults and mark inferred:true
+                    const bestEffortPrompt = `${SYSTEM_PROMPT}\n\nEl usuario ha dado información insuficiente. Genera un DIAGRAMA por defecto de "mejor esfuerzo" a partir de la entrada original: ${userInput}.\nSi debes inferir tipos o atributos, inclúyelos y marca cada atributo inferido con \"inferred\": true.\nDevuelve solamente JSON válido que contenga al menos elementos[] con clases.\nNo incluyas explicaciones.`;
+                    const best = await model.generateContent(bestEffortPrompt);
+                    const bestResp = await best.response;
+                    const bestText = await bestResp.text();
+                    let bestDiagram;
+                    try { bestDiagram = JSON.parse(bestText); } catch (e) {
+                        const jsonMatch2 = bestText.match(/\{[\s\S]*\}/);
+                        if (jsonMatch2) bestDiagram = JSON.parse(jsonMatch2[0]);
+                        else throw new Error('Best-effort: respuesta no contiene JSON válido');
+                    }
+
+                    // Normalize bestDiagram similar to earlier normalization
+                    if (bestDiagram.elements && !Array.isArray(bestDiagram.elements)) bestDiagram.elements = Object.values(bestDiagram.elements || {});
+                    if (!bestDiagram.relationships && bestDiagram.connections) bestDiagram.relationships = Array.isArray(bestDiagram.connections) ? bestDiagram.connections : Object.values(bestDiagram.connections || {});
+                    if (bestDiagram.relationships && !Array.isArray(bestDiagram.relationships)) bestDiagram.relationships = Object.values(bestDiagram.relationships || {});
+
+                    // If best-effort produced elements, prefer it, but also keep clarifyingQuestions if present
+                    if (bestDiagram.elements && Array.isArray(bestDiagram.elements) && bestDiagram.elements.length > 0) {
+                        // copy clarifyingQuestions from original if present
+                        if (diagram.clarifyingQuestions) bestDiagram.clarifyingQuestions = diagram.clarifyingQuestions;
+                        diagram = bestDiagram;
+                    }
+                } catch (beErr) {
+                    console.warn('Best-effort generation failed:', beErr.message || beErr);
+                    // keep original diagram (with clarifyingQuestions) if best-effort fails
+                }
+            }
+
             // Normalizar estructuras comunes y tolerar pequeñas variaciones
             try {
                 // Si `elements` viene como objeto (mapa) convertir a array
@@ -281,8 +465,51 @@ class AIController {
                 console.warn('Error durante normalización del diagrama AI:', normErr.message);
             }
 
-            // Validate the diagram structure
-            AIController.validateDiagramStructure(diagram);
+                // Validate against JSON schema (Ajv). If invalid, attempt one corrective retry.
+                try {
+                    const ok = validateDiagram(diagram);
+                    if (!ok) {
+                        console.warn('AI diagram failed schema validation:', validateDiagram.errors);
+                        // Attempt one retry asking the model to return a JSON that matches the schema exactly
+                        try {
+                            const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+                            const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+                            const correctionPrompt = `${SYSTEM_PROMPT}\n\nLa respuesta anterior no cumplió el esquema esperado. Devuelve ÚNICAMENTE un JSON válido que cumpla este esquema: ${JSON.stringify(DIAGRAM_SCHEMA)}\nBasado en la entrada original: ${userInput}\nPor favor devuelve solo JSON sin explicaciones.`;
+                            const retryResult = await model.generateContent(correctionPrompt);
+                            const retryResp = await retryResult.response;
+                            const retryText = await retryResp.text();
+                            let retryDiagram;
+                            try { retryDiagram = JSON.parse(retryText); } catch (e) {
+                                const jsonMatch2 = retryText.match(/\{[\s\S]*\}/);
+                                if (jsonMatch2) retryDiagram = JSON.parse(jsonMatch2[0]);
+                                else throw new Error('Retry: respuesta no contiene JSON válido');
+                            }
+
+                            // Normalize retry output
+                            if (retryDiagram.elements && !Array.isArray(retryDiagram.elements)) retryDiagram.elements = Object.values(retryDiagram.elements || {});
+                            if (!retryDiagram.relationships && retryDiagram.connections) retryDiagram.relationships = Array.isArray(retryDiagram.connections) ? retryDiagram.connections : Object.values(retryDiagram.connections || {});
+                            if (retryDiagram.relationships && !Array.isArray(retryDiagram.relationships)) retryDiagram.relationships = Object.values(retryDiagram.relationships || {});
+
+                            // Validate corrected diagram
+                            const ok2 = validateDiagram(retryDiagram);
+                            if (!ok2) {
+                                console.warn('Retry still failed validation:', validateDiagram.errors);
+                                throw new Error('La respuesta de AI no cumple el esquema esperado tras reintento');
+                            }
+                            // Use corrected diagram
+                            diagram = retryDiagram;
+                        } catch (retryErr) {
+                            console.error('AI correction retry failed:', retryErr.message || retryErr);
+                            throw retryErr;
+                        }
+                    }
+                } catch (schemaErr) {
+                    console.warn('Schema validation error:', schemaErr.message || schemaErr);
+                    throw new Error('Error validando la estructura del diagrama generado por la IA');
+                }
+
+                // Validate the diagram structure (legacy checks)
+                AIController.validateDiagramStructure(diagram);
 
             return diagram;
 

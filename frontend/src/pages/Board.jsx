@@ -71,16 +71,43 @@ const Board = () => {
     let mounted = true;
     (async () => {
       try {
-        const res = await fetch(`${import.meta.env.VITE_WS_URL || window.location.origin}/apis`, { credentials: 'include' });
+        const base = import.meta.env.VITE_WS_URL || window.location.origin;
+        const url = `${base}/apis`;
+
+        // First attempt: cookie-based credentialed request
+        let res = await fetch(url, { credentials: 'include' });
         if (!mounted) return;
-        if (res.ok) {
-          const data = await res.json();
-          setUser({ email: data.email, id: data.id, name: data.name });
+
+        // Parse payload carefully: backend sometimes wraps { error, data }
+        let payload = await res.json().catch(() => null);
+
+        // If we got a wrapper like { error, data } use payload.data
+        let profile = payload && payload.data ? payload.data : payload;
+
+        // If unauthorized or profile looks empty, try Authorization fallback using localStorage token
+        if ((!res.ok || !profile || Object.keys(profile).length === 0) && res.status !== 200) {
+          // try fallback token
+          const token = localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('accessToken');
+          if (token) {
+            res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+            payload = await res.json().catch(() => null);
+            profile = payload && payload.data ? payload.data : payload;
+          }
+        }
+
+        if (!mounted) return;
+
+        if (res.ok && profile && profile.id) {
+          setUser({ email: profile.email, id: profile.id, name: profile.name || profile.fullname || profile.username });
           setLoading(false);
         } else {
+          // Not authenticated - go to login
+          setUser(null);
           navigate('/login');
         }
       } catch (err) {
+        console.error('Error fetching profile:', err);
+        setUser(null);
         navigate('/login');
       }
     })();

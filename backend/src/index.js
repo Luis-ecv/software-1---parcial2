@@ -54,6 +54,9 @@ io.use((socket, next) => {
 
 app.set('io', io);
 const salasActivas = new Map();
+// Debounced save timers per sala to avoid excessive DB writes during rapid updates
+const pendingSaveTimers = new Map();
+const SAVE_DEBOUNCE_MS = parseInt(process.env.SAVE_DEBOUNCE_MS || '3000', 10);
 
 io.on('connection', (socket) => {
     console.log('🟢 Nuevo cliente conectado:', socket.id);
@@ -222,6 +225,28 @@ io.on('connection', (socket) => {
                 sala.ultimaModificacion = Date.now();
                 if (action === 'fullState') {
                     sala.ultimoEstado = data.data.state;
+                    // Schedule a debounced save to persist the new full state to DB
+                    try {
+                        // Clear any existing timer
+                        const existing = pendingSaveTimers.get(salaIdNormalizado);
+                        if (existing && existing.timeout) clearTimeout(existing.timeout);
+
+                        const timeout = setTimeout(async () => {
+                            try {
+                                const xmlString = JSON.stringify(sala.ultimoEstado);
+                                console.log(`Debounced save: persisting sala ${salaIdNormalizado} (length ${xmlString.length})`);
+                                await updateSala(salaIdNormalizado, undefined, xmlString, undefined, io);
+                                pendingSaveTimers.delete(salaIdNormalizado);
+                                console.log(`Debounced save: sala ${salaIdNormalizado} persisted`);
+                            } catch (saveErr) {
+                                console.error(`Debounced save failed for sala ${salaIdNormalizado}:`, saveErr);
+                            }
+                        }, SAVE_DEBOUNCE_MS);
+
+                        pendingSaveTimers.set(salaIdNormalizado, { timeout, ts: Date.now() });
+                    } catch (schedErr) {
+                        console.error('Error scheduling debounced save:', schedErr);
+                    }
                 }
             }
             const clientesEnSala = io.sockets.adapter.rooms.get(`sala_${salaIdNormalizado}`);
