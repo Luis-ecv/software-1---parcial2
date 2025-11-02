@@ -576,9 +576,9 @@ export const useSocketFlow = (boardId, currentUser = null, options = {}) => {
     setSelectedEdge(edge);
     const completeEdgeData = { type: 'Association', startLabel: '', endLabel: '', label: '', sourceRole: '', targetRole: '', selected: true, ...edge.data };
     setEditingEdge(completeEdgeData);
-    const updatedEdges = edges.map(e => ({ ...e, data: { ...e.data, selected: e.id === edge.id } }));
-    setEdges(updatedEdges);
-  }, [edges]);
+    // Use functional setState to avoid stomping on concurrent updates that may have added/removed edges
+    setEdges((prev) => prev.map(e => ({ ...e, data: { ...e.data, selected: e.id === edge.id } })));
+  }, []);
 
   const updateNodeData = useCallback(async () => {
     if (!selectedNode) return;

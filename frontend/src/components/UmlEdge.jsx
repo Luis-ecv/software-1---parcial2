@@ -77,6 +77,8 @@ const UML_RELATIONSHIP_TYPES = {
 
 const UmlEdge = ({
   id,
+  source,
+  target,
   sourceX,
   sourceY,
   targetX,
@@ -86,8 +88,12 @@ const UmlEdge = ({
   data,
   style = {}
 }) => {
-  // Detectar si es una conexión recursiva (mismo nodo)
-  const isRecursive = sourceX === targetX && sourceY === targetY;
+  // Detectar si es una conexión recursiva (mismo nodo).
+  // Preferir comparar los ids de nodo (source === target). Como fallback,
+  // comparar coordenadas (por compatibilidad con versiones antiguas).
+  const isRecursive = (typeof source !== 'undefined' && typeof target !== 'undefined')
+    ? source === target
+    : (sourceX === targetX && sourceY === targetY);
   
   // Usar puntos de control personalizados si están definidos en data
   const customControlPoints = data?.controlPoints || [];
