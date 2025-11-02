@@ -18,6 +18,7 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
   const recordedChunksRef = useRef([]);
+  const [, forceUpdate] = useState(0); // Para forzar re-render
 
   // Estados para manejo de clarificaciones en modificaciones
   const [pendingClarification, setPendingClarification] = useState(null);
@@ -343,7 +344,16 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
 
       {/* Panel */}
       {open && (
-  <div className="fixed bottom-20 right-28 z-50 w-96 rounded-lg shadow-lg overflow-hidden" role="dialog" aria-label="AI Diagram Generator">
+        <div className="fixed bottom-20 right-6 z-50 w-[90vw] max-w-md rounded-xl shadow-2xl overflow-hidden bg-white border border-gray-200" role="dialog" aria-label="AI Diagram Generator">
+          {/* Backdrop para cerrar al hacer clic fuera */}
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-20 z-40"
+            onClick={toggle}
+            aria-hidden="true"
+          ></div>
+          
+          {/* Panel principal */}
+          <div className="relative z-50 bg-white rounded-xl shadow-2xl max-h-[80vh] flex flex-col">
           {/* Header */}
           <div className="px-4 py-2 bg-gradient-to-r from-indigo-400 to-purple-600 text-white flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -367,8 +377,9 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
             </div>
           </div>
 
-          {/* Body */}
-          <div className="bg-white p-3">
+          {/* Body - Scrollable content */}
+          <div className="flex-1 overflow-y-auto bg-white">
+            <div className="p-4 space-y-4">
             <div className="mb-3 p-3 bg-gray-50 rounded-lg text-sm text-gray-700 border">
               <div className="mb-1">🎉 ¡Hola! Soy tu asistente de IA para crear diagramas de clases.</div>
               <div className="text-xs text-gray-500">Envía texto, una nota de voz o una imagen y generaré un diagrama UML automáticamente.</div>
@@ -419,17 +430,78 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
               )}
 
               {mode === 'voice' && (
-                <div className="flex items-center gap-2">
-                  <div className="flex-1">
-                    <div className="text-sm mb-1">Grabadora de voz</div>
-                    <div className="flex items-center gap-2">
+                <div className="p-4 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg border border-purple-200">
+                  <div className="text-center">
+                    <div className="text-sm font-medium text-purple-700 mb-3">🎙️ Grabadora de Voz</div>
+                    
+                    {/* Indicador visual de grabación */}
+                    {isRecording && (
+                      <div className="mb-3">
+                        <div className="flex justify-center items-center gap-2 mb-2">
+                          <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                          <span className="text-sm font-medium text-red-600">Grabando...</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-1.5">
+                          <div className="bg-red-500 h-1.5 rounded-full animate-pulse" style={{width: '100%'}}></div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Estado de grabación completada */}
+                    {!isRecording && recordedChunksRef.current && recordedChunksRef.current.length > 0 && (
+                      <div className="mb-3 p-2 bg-green-50 border border-green-200 rounded-lg">
+                        <div className="flex items-center justify-center gap-2 text-green-700">
+                          <span className="text-lg">✅</span>
+                          <span className="text-sm font-medium">Audio grabado - Listo para enviar</span>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Botones de control */}
+                    <div className="flex justify-center gap-3">
                       <button
                         onClick={() => { if (!isRecording) startRecording(); else stopRecording(); }}
-                        className={`px-3 py-2 rounded ${isRecording ? 'bg-red-500 text-white' : 'bg-indigo-600 text-white'}`}
+                        disabled={loading}
+                        className={`px-6 py-3 rounded-full font-medium transition-all duration-200 transform hover:scale-105 ${
+                          isRecording 
+                            ? 'bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-200' 
+                            : 'bg-purple-600 hover:bg-purple-700 text-white shadow-lg shadow-purple-200'
+                        } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
-                        {isRecording ? 'Grabando…' : 'Grabar'}
+                        {isRecording ? (
+                          <span className="flex items-center gap-2">
+                            <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
+                            Detener
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-2">
+                            🎤 Grabar
+                          </span>
+                        )}
                       </button>
-                      <div className="text-xs text-gray-500">{isRecording ? 'Pulsa para detener' : 'Pulsa para grabar una nota de voz'}</div>
+                      
+                      {/* Botón de limpiar grabación */}
+                      {!isRecording && recordedChunksRef.current && recordedChunksRef.current.length > 0 && (
+                        <button
+                          onClick={() => {
+                            recordedChunksRef.current = [];
+                            forceUpdate(Date.now()); // Forzar re-render
+                          }}
+                          className="px-4 py-3 bg-gray-500 hover:bg-gray-600 text-white rounded-full font-medium transition-all duration-200"
+                        >
+                          🗑️ Limpiar
+                        </button>
+                      )}
+                    </div>
+                    
+                    {/* Instrucciones */}
+                    <div className="mt-3 text-xs text-purple-600">
+                      {isRecording 
+                        ? 'Habla claramente y pulsa "Detener" cuando termines' 
+                        : recordedChunksRef.current && recordedChunksRef.current.length > 0
+                          ? 'Audio listo. Pulsa "Enviar" para generar el diagrama'
+                          : 'Pulsa "Grabar" y describe el diagrama que quieres crear'
+                      }
                     </div>
                   </div>
                 </div>
@@ -767,23 +839,102 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
               )}
             </div>
 
-            {/* Messages preview area */}
-            <div className="max-h-36 overflow-y-auto border bg-white rounded-lg p-2 shadow-sm">
-              {messages.length === 0 && (
-                <div className="text-xs text-gray-500">Historial vacío. Envía texto, imagen o nota de voz.</div>
-              )}
-              {messages.map((m, idx) => (
-                <div key={idx} className={`mb-3 ${m.role === 'user' ? 'text-right' : 'text-left'}`}>
-                  <div className={`inline-block p-2 rounded ${m.role === 'user' ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-800'} border` }>
-                    <div className="text-xs">{m.text}</div>
-                    {m.diagram && (
-                      <div className="mt-1 text-xs text-green-700">Diagrama recibido — #{(m.diagram.elements||[]).length} clases</div>
-                    )}
-                  </div>
+            {/* Messages preview area - Mejorado con scroll y contenido responsivo */}
+            <div className="relative">
+              <div className="max-h-40 overflow-y-auto border bg-white rounded-lg shadow-sm scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+                <div className="p-3 space-y-3">
+                  {messages.length === 0 && (
+                    <div className="text-center py-4">
+                      <div className="text-gray-400 text-sm mb-2">📝 Historial de conversación</div>
+                      <div className="text-xs text-gray-500">Envía texto, imagen o nota de voz para comenzar</div>
+                    </div>
+                  )}
+                  
+                  {messages.map((m, idx) => (
+                    <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[85%] break-words ${m.role === 'user' ? 'text-right' : 'text-left'}`}>
+                        <div className={`inline-block p-3 rounded-lg shadow-sm border ${
+                          m.role === 'user' 
+                            ? 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white border-indigo-200' 
+                            : 'bg-gradient-to-br from-gray-50 to-gray-100 text-gray-800 border-gray-200'
+                        }`}>
+                          {/* Indicador de rol */}
+                          <div className={`text-xs font-medium mb-1 ${
+                            m.role === 'user' ? 'text-indigo-100' : 'text-gray-500'
+                          }`}>
+                            {m.role === 'user' ? '👤 Tú' : '🤖 IA Assistant'}
+                          </div>
+                          
+                          {/* Contenido del mensaje con scroll horizontal si es necesario */}
+                          <div className={`text-sm leading-relaxed ${
+                            m.text && m.text.length > 100 ? 'max-h-20 overflow-y-auto scrollbar-thin' : ''
+                          }`}>
+                            {m.text}
+                          </div>
+                          
+                          {/* Preguntas de clarificación */}
+                          {m.questions && Array.isArray(m.questions) && (
+                            <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
+                              <div className="font-medium text-yellow-800 mb-1">❓ Necesito aclarar:</div>
+                              <ul className="space-y-1">
+                                {m.questions.map((q, qIdx) => (
+                                  <li key={qIdx} className="text-yellow-700">• {q}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          
+                          {/* Indicador de diagrama */}
+                          {m.diagram && (
+                            <div className="mt-2 flex items-center gap-2 text-xs">
+                              <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded-full border border-green-200">
+                                <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                                Diagrama generado
+                              </span>
+                              <span className="text-green-600">
+                                {(m.diagram.elements || []).length} clases
+                              </span>
+                            </div>
+                          )}
+                          
+                          {/* Timestamp */}
+                          <div className={`text-xs mt-2 ${
+                            m.role === 'user' ? 'text-indigo-200' : 'text-gray-400'
+                          }`}>
+                            {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+                
+                {/* Indicador de carga */}
+                {loading && (
+                  <div className="flex justify-start p-3 border-t">
+                    <div className="max-w-[85%]">
+                      <div className="bg-gray-100 border border-gray-200 rounded-lg p-3 shadow-sm">
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <div className="flex gap-1">
+                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                          </div>
+                          <span>IA está generando...</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Gradiente de scroll para indicar más contenido */}
+              {messages.length > 3 && (
+                <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-white to-transparent pointer-events-none rounded-b-lg"></div>
+              )}
             </div>
-          </div>
+            </div> {/* Cierre del contenido del cuerpo */}
+          </div> {/* Cierre del área de scroll del cuerpo */}
 
           {/* Footer */}
           <div className="px-3 py-2 bg-gradient-to-r from-indigo-400 to-purple-600 flex items-center gap-2">
@@ -802,6 +953,9 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
               </button>
             </div>
           </div>
+          {/* Cierre del panel principal */}
+          </div>
+        {/* Cierre del contenedor del panel */}
         </div>
       )}
     </div>

@@ -18,30 +18,58 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'your_gemini_
 
 
 // System prompt for UML diagram generation and modification (friendly for novices and experts)
-const SYSTEM_PROMPT = `Eres un asistente inteligente para diagramas UML que puede GENERAR nuevos diagramas y MODIFICAR diagramas existentes.
+const SYSTEM_PROMPT = `Eres un asistente inteligente para diagramas UML que puede GENERAR diagramas completos y detallados desde descripciones simples.
 
 OBJETIVO: Producir SÓLO un objeto JSON válido que siga el esquema descrito. No incluyas texto explicativo ni markdown.
 
+🎯 MODO INTELIGENTE PARA USUARIOS NOVATOS:
+Cuando el usuario proporcione descripciones simples como "diagrama para una tienda pequeña con productos, clientes y proveedores", debes:
+
+1. INFERIR CLASES COMPLETAS basándote en el contexto del dominio
+2. AÑADIR ATRIBUTOS LÓGICOS para cada entidad mencionada
+3. CREAR MÉTODOS TÍPICOS que estas entidades necesitarían
+4. ESTABLECER RELACIONES NATURALES entre las clases
+5. USAR CONOCIMIENTO DEL DOMINIO para completar la información faltante
+
+EJEMPLOS DE INFERENCIA INTELIGENTE:
+
+Para "tienda pequeña con productos, clientes y proveedores":
+- Producto: id, nombre, precio, stock, categoria, proveedor_id + métodos: calcularTotal(), actualizarStock()
+- Cliente: id, nombre, email, telefono, direccion + métodos: agregarCompra(), obtenerHistorial()
+- Proveedor: id, nombre, contacto, empresa + métodos: suministrar(), actualizarCatalogo()
+- Venta: id, fecha, cliente_id, total + métodos: procesarPago(), generarFactura()
+- Relaciones: Cliente -compra-> Producto, Proveedor -suministra-> Producto
+
+Para "sistema escolar":
+- Estudiante: id, nombre, edad, grado, matricula + métodos: inscribirse(), consultarNotas()
+- Profesor: id, nombre, materia, experiencia + métodos: calificar(), asignarTarea()
+- Curso: id, nombre, creditos, semestre + métodos: matricularEstudiante(), asignarProfesor()
+
+Para "biblioteca":
+- Libro: id, titulo, autor, isbn, disponible + métodos: prestar(), devolver()
+- Usuario: id, nombre, email, tipo + métodos: solicitarPrestamo(), renovar()
+- Prestamo: id, fecha_prestamo, fecha_devolucion + métodos: calcularMulta(), extender()
+
 OPERACIONES SOPORTADAS:
-1. GENERAR: Crear un nuevo diagrama desde descripción textual
+1. GENERAR: Crear diagramas completos desde descripciones simples o técnicas
 2. MODIFICAR: Añadir, actualizar o ELIMINAR elementos de un diagrama existente
-3. CLARIFICAR: Hacer preguntas cuando la instrucción es ambigua
+3. CLARIFICAR: Solo cuando la descripción es extremadamente ambigua
 
 COMPORTAMIENTO PARA MODIFICACIONES:
 - AÑADIR: "añade clase X", "agrega atributo Y a Z" → incluir nuevos elements/relationships
 - ACTUALIZAR: "cambia el tipo de X", "renombra clase Y a Z" → modificar elements existentes
 - ELIMINAR: "elimina clase X", "borra atributo Y", "quita relación entre A y B" → EXCLUIR del resultado final
-- AMBIGUO: "añade atributo nombre" SIN especificar la clase → usar "clarifyingQuestions"
+- AMBIGUO: Solo usar "clarifyingQuestions" si es imposible inferir del contexto
 
 MANEJO DE ELIMINACIONES:
 - Si el usuario dice "elimina la clase Cliente", el resultado NO debe contener esa clase
 - Si dice "elimina atributo precio de Producto", Producto debe aparecer sin ese atributo
 - Para eliminar relaciones: "elimina relación entre X e Y" → no incluir esa edge
 
-CLARIFICACIONES:
-- Cuando falte información: "¿A qué clase quieres añadir el atributo 'nombre'?"
-- Cuando haya ambigüedad: "¿Te refieres a la clase 'Usuario' o 'Cliente'?"
-- Máximo 3 preguntas por respuesta
+CLARIFICACIONES (úsalas RARAMENTE):
+- Solo cuando sea imposible inferir del contexto o dominio
+- Máximo 2 preguntas por respuesta
+- Prefiere generar un diagrama completo usando conocimiento del dominio
 
 ESQUEMA JSON OBLIGATORIO:
 {
@@ -435,24 +463,14 @@ class AIController {
                     break;
 
                 case 'voice':
-                    // Handle audio file from FormData
-                    if (req.files && req.files.audio) {
-                        userInput = await AIController.transcribeAudio(req.files.audio[0]);
-                        responseMessage = `Diagrama generado desde audio: "${userInput}"`;
-                    } else {
-                        throw new Error('No se encontró archivo de audio');
-                    }
-                    break;
+                    // Delegate to specialized voice controller
+                    const AIVoiceController = (await import('./ai.voice.controller.js')).default;
+                    return await AIVoiceController.processVoiceInput(req, res);
 
                 case 'image':
-                    // Handle image file from FormData
-                    if (req.files && req.files.image) {
-                        userInput = await AIController.analyzeImage(req.files.image[0]);
-                        responseMessage = `Diagrama generado desde imagen`;
-                    } else {
-                        throw new Error('No se encontró archivo de imagen');
-                    }
-                    break;
+                    // Delegate to specialized image controller
+                    const AIImageController = (await import('./ai.image.controller.js')).default;
+                    return await AIImageController.processImageInput(req, res);
 
                 default:
                     throw new Error('Tipo de entrada no válido');
@@ -666,106 +684,9 @@ class AIController {
         }
     }
 
-    // Transcribe audio using Gemini
-    static async transcribeAudio(audioFile) {
-        let tempPath; // Define tempPath here to be accessible in the finally block
-        try {
-            // Save the audio file temporarily
-            tempPath = path.join(__dirname, '../../temp/', `audio_${Date.now()}.wav`);
-            
-            // Create temp directory if it doesn't exist
-            const tempDir = path.dirname(tempPath);
-            if (!fs.existsSync(tempDir)) {
-                fs.mkdirSync(tempDir, { recursive: true });
-            }
 
-            fs.writeFileSync(tempPath, audioFile.buffer);
 
-            // OpenAI implementation (commented out)
-            /*
-            const transcription = await openai.audio.transcriptions.create({
-                file: fs.createReadStream(tempPath),
-                model: "whisper-1",
-            });
-            return transcription.text;
-            */
 
-            // Gemini implementation (model configurable via GEMINI_MODEL env var)
-            const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-            const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-            const audioFile = await genAI.uploadFile(tempPath);
-            const prompt = "Transcribe this audio.";
-
-            const result = await model.generateContent([prompt, audioFile]);
-            const response = await result.response;
-            const text = await response.text();
-            return text;
-
-        } catch (error) {
-            console.error('Error transcribiendo audio:', error);
-            throw new Error(`Error transcribiendo audio: ${error.message}`);
-        } finally {
-            // Clean up temp file
-            if (tempPath && fs.existsSync(tempPath)) {
-                fs.unlinkSync(tempPath);
-            }
-        }
-    }
-
-    // Analyze image using Gemini Vision
-    static async analyzeImage(imageFile) {
-        try {
-            // OpenAI implementation (commented out)
-            /*
-            // Convert image to base64
-            const base64Image = imageFile.buffer.toString('base64');
-            const imageUrl = `data:${imageFile.mimetype};base64,${base64Image}`;
-
-            const response = await openai.chat.completions.create({
-                model: "gpt-4-vision-preview",
-                messages: [
-                    {
-                        role: "user",
-                        content: [
-                            {
-                                type: "text",
-                                text: "Analiza esta imagen y describe el sistema, clases, objetos o conceptos que ves. Describe todo lo que puedas observar para crear un diagrama UML de clases."
-                            },
-                            {
-                                type: "image_url",
-                                image_url: {
-                                    url: imageUrl
-                                }
-                            }
-                        ]
-                    }
-                ],
-                max_tokens: 1000
-            });
-            return response.choices[0].message.content;
-            */
-
-            // Gemini implementation (model configurable via GEMINI_MODEL env var)
-            const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-            const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-            const prompt = "Analiza esta imagen y describe el sistema, clases, objetos o conceptos que ves. Describe todo lo que puedas observar para crear un diagrama UML de clases.";
-            const imagePart = {
-                inlineData: {
-                    data: imageFile.buffer.toString('base64'),
-                    mimeType: imageFile.mimetype
-                }
-            };
-
-            const result = await model.generateContent([prompt, imagePart]);
-            const response = await result.response;
-            const text = await response.text();
-            return text;
-
-        } catch (error) {
-            console.error('Error analizando imagen:', error);
-            throw new Error(`Error analizando imagen: ${error.message}`);
-        }
-    }
 
     // Validate and normalize diagram structure
     static validateDiagramStructure(diagram) {
