@@ -17,32 +17,64 @@ import Ajv from 'ajv';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'your_gemini_api_key_here');
 
 
-// System prompt for UML diagram generation (friendly for novices and experts)
-const SYSTEM_PROMPT = `Eres un asistente que genera diagramas de clases UML en formato JSON para usuarios con distintos niveles de experiencia (desde novatos hasta diseñadores expertos).
+// System prompt for UML diagram generation and modification (friendly for novices and experts)
+const SYSTEM_PROMPT = `Eres un asistente inteligente para diagramas UML que puede GENERAR nuevos diagramas y MODIFICAR diagramas existentes.
 
-OBJETIVO: Producir SÓLO un único objeto JSON válido que siga el esquema descrito (elements, relationships). No incluyas texto explicativo ni markdown en la respuesta.
+OBJETIVO: Producir SÓLO un objeto JSON válido que siga el esquema descrito. No incluyas texto explicativo ni markdown.
 
-COMPORTAMIENTO:
-- Si la entrada del usuario contiene suficiente detalle, genera clases (elements) y relaciones (relationships) con atributos, métodos, visibilidades y posiciones.
-- Si falta información importante o la entrada es ambigua, NO inventes suposiciones arriesgadas. En su lugar, incluye un campo opcional "clarifyingQuestions": ["..."], con preguntas cortas y concretas que el frontend pueda presentar al usuario (por ejemplo: "¿La clase Pedido debe tener un atributo cantidad de tipo int?").
-- Para salidas aptas para novatos: genera modelos simples y legibles usando tipos básicos (string, int, bool, Date). Si el tipo es incierto, usa "string" y marca el atributo con "inferred": true para indicar que fue inferido.
-- Para usuarios expertos: si la entrada ya contiene firmas de métodos o tipos detallados, conserva ese nivel de detalle en el JSON.
-- Posiciones: asigna posiciones razonables (separación mínima de ~200px entre clases) para facilitar la colocación en el canvas.
-- IDs: usa cadenas únicas para id.
+OPERACIONES SOPORTADAS:
+1. GENERAR: Crear un nuevo diagrama desde descripción textual
+2. MODIFICAR: Añadir, actualizar o ELIMINAR elementos de un diagrama existente
+3. CLARIFICAR: Hacer preguntas cuando la instrucción es ambigua
 
-ESQUEMA RESUMIDO (obligatorio):
+COMPORTAMIENTO PARA MODIFICACIONES:
+- AÑADIR: "añade clase X", "agrega atributo Y a Z" → incluir nuevos elements/relationships
+- ACTUALIZAR: "cambia el tipo de X", "renombra clase Y a Z" → modificar elements existentes
+- ELIMINAR: "elimina clase X", "borra atributo Y", "quita relación entre A y B" → EXCLUIR del resultado final
+- AMBIGUO: "añade atributo nombre" SIN especificar la clase → usar "clarifyingQuestions"
+
+MANEJO DE ELIMINACIONES:
+- Si el usuario dice "elimina la clase Cliente", el resultado NO debe contener esa clase
+- Si dice "elimina atributo precio de Producto", Producto debe aparecer sin ese atributo
+- Para eliminar relaciones: "elimina relación entre X e Y" → no incluir esa edge
+
+CLARIFICACIONES:
+- Cuando falte información: "¿A qué clase quieres añadir el atributo 'nombre'?"
+- Cuando haya ambigüedad: "¿Te refieres a la clase 'Usuario' o 'Cliente'?"
+- Máximo 3 preguntas por respuesta
+
+ESQUEMA JSON OBLIGATORIO:
 {
-  "elements": [ { id, type, name, attributes[], methods[], position } ],
-  "relationships": [ { id, type, sourceId, targetId, cardinality } ],
-  optional: "clarifyingQuestions": [string]
+  "elements": [
+    {
+      "id": "string_unico",
+      "type": "classNode", 
+      "name": "NombreClase",
+      "attributes": ["nombre: string", "edad: int"],
+      "methods": ["calcular(): float"],
+      "position": { "x": 100, "y": 150 }
+    }
+  ],
+  "relationships": [
+    {
+      "id": "string_unico",
+      "type": "Association|Inheritance|Composition|Aggregation",
+      "sourceId": "id_clase_origen", 
+      "targetId": "id_clase_destino",
+      "cardinality": "1..n|1..1|0..n"
+    }
+  ],
+  "clarifyingQuestions": ["pregunta1", "pregunta2"] // OPCIONAL
 }
 
-REGLAS IMPORTANTES:
-1) Devuelve SÓLO JSON que cumpla el esquema (sin texto adicional).
-2) Si tienes dudas importantes sobre el modelo, usa "clarifyingQuestions" en lugar de inventar detalles.
-3) Incluye la propiedad "inferred": true en atributos cuyo tipo fue adivinado.
-4) Usa nombres y tipos claros; para tipos desconocidos, default a "string".
-5) No incluyas explicaciones; el frontend manejará la interacción con el usuario si se requieren aclaraciones.`;
+REGLAS CRÍTICAS:
+1) Respuesta = SOLO JSON válido (sin explicaciones)
+2) Para eliminar: NO incluir el elemento en el resultado
+3) Conservar IDs existentes cuando sea posible
+4) Posiciones: distribución lógica con separación ≥200px
+5) Tipos de datos: string, int, float, bool, Date
+6) Si hay dudas, usar "clarifyingQuestions" en lugar de adivinar
+7) Mantener consistencia con el estado previo del diagrama`;
 
 // JSON Schema para validar la estructura esperada del diagrama UML
 const DIAGRAM_SCHEMA = {
@@ -115,113 +147,221 @@ const ajv = new Ajv({ allErrors: true, strict: false });
 const validateDiagram = ajv.compile(DIAGRAM_SCHEMA);
 
 class AIController {
-    // Modify existing diagram based on a prompt (dry-run by default)
+    // Modify existing diagram based on a prompt (supports add/update/remove operations)
     static async modifyDiagram(req, res) {
         try {
-            const { prompt, mode = 'merge', dryRun = true, nodes: curNodes = [], edges: curEdges = [] } = req.body || {};
+            const { 
+                prompt, 
+                mode = 'modify', 
+                dryRun = false, 
+                nodes: curNodes = [], 
+                edges: curEdges = [],
+                clarification = null,
+                originalPrompt = null,
+                salaId = null 
+            } = req.body || {};
 
             if (!prompt || typeof prompt !== 'string') {
-                return res.status(400).json({ success: false, error: 'Se requiere el campo prompt' });
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'Se requiere el campo prompt con la descripción de la modificación' 
+                });
             }
 
-            // Build a user input that includes the current state and the user's prompt
-            const stateSummary = {
-                elements: Array.isArray(curNodes) ? curNodes.map(n => ({ id: n.id, name: n.data?.className || (n.name || n.data?.name), attributes: n.data?.attributes || [], methods: n.data?.methods || [] })) : [],
-                relationships: Array.isArray(curEdges) ? curEdges.map(e => ({ id: e.id, sourceId: e.source, targetId: e.target, type: e.data?.type || (e.type || 'association') })) : []
+            console.log(`🔧 ModifyDiagram: "${prompt}" (mode: ${mode}, dryRun: ${dryRun})`);
+
+            // Preparar el estado actual del diagrama para el contexto de la IA
+            const currentState = {
+                elements: Array.isArray(curNodes) ? curNodes.map(n => ({
+                    id: n.id,
+                    name: n.data?.className || n.name || 'Clase',
+                    attributes: Array.isArray(n.data?.attributes) ? n.data.attributes : [],
+                    methods: Array.isArray(n.data?.methods) ? n.data.methods : [],
+                    position: n.position || { x: 100, y: 100 }
+                })) : [],
+                relationships: Array.isArray(curEdges) ? curEdges.map(e => ({
+                    id: e.id,
+                    sourceId: e.source,
+                    targetId: e.target,
+                    type: e.data?.type || 'Association'
+                })) : []
             };
 
-            const userInput = `Estado actual del diagrama (JSON): ${JSON.stringify(stateSummary)}\n\nInstrucción del usuario: ${prompt}\n\nModo: ${mode}. Responde SOLO un JSON con la llave 'elements' y 'relationships' con la modificación propuesta. Si faltan datos, incluye 'clarifyingQuestions'.`;
+            // Construir el prompt contextual para la IA
+            let aiPrompt = `ESTADO ACTUAL DEL DIAGRAMA:\n${JSON.stringify(currentState, null, 2)}\n\n`;
+            
+            if (clarification && originalPrompt) {
+                aiPrompt += `INSTRUCCIÓN ORIGINAL: ${originalPrompt}\n`;
+                aiPrompt += `ACLARACIÓN DEL USUARIO: ${clarification}\n\n`;
+                aiPrompt += `Ahora que tienes la aclaración, procede con la modificación solicitada.`;
+            } else {
+                aiPrompt += `INSTRUCCIÓN DE MODIFICACIÓN: ${prompt}\n\n`;
+                aiPrompt += `Aplica los cambios solicitados. Si necesitas aclaración, usa 'clarifyingQuestions'.`;
+            }
 
-            // Use existing generation helper to ask the model
-            const aiDiagram = await AIController.generateUMLFromText(userInput);
+            console.log('🤖 Enviando prompt a IA:', aiPrompt.substring(0, 500) + '...');
 
-            // Normalize aiDiagram to arrays
-            if (aiDiagram.elements && !Array.isArray(aiDiagram.elements)) aiDiagram.elements = Object.values(aiDiagram.elements || {});
-            if (!aiDiagram.relationships && aiDiagram.connections) aiDiagram.relationships = Array.isArray(aiDiagram.connections) ? aiDiagram.connections : Object.values(aiDiagram.connections || {});
-            if (aiDiagram.relationships && !Array.isArray(aiDiagram.relationships)) aiDiagram.relationships = Object.values(aiDiagram.relationships || {});
+            // Llamar a la IA para procesar la modificación
+            const aiResponse = await AIController.generateUMLFromText(aiPrompt);
+            
+            console.log('🎯 Respuesta de IA:', JSON.stringify(aiResponse, null, 2).substring(0, 1000) + '...');
 
-            // Merge strategy: default 'merge' will add new nodes/edges and update existing, but will NOT remove existing nodes/edges
-            const existingNodesMap = new Map((curNodes || []).map(n => [String(n.id), n]));
-            const existingEdgesMap = new Map((curEdges || []).map(e => [String(e.id), e]));
+            // Normalizar la respuesta de la IA
+            if (!aiResponse || typeof aiResponse !== 'object') {
+                throw new Error('La IA no devolvió una respuesta válida');
+            }
 
-            const addedNodes = [];
-            const updatedNodes = [];
+            // Verificar si la IA necesita aclaración
+            if (aiResponse.clarifyingQuestions && Array.isArray(aiResponse.clarifyingQuestions) && aiResponse.clarifyingQuestions.length > 0) {
+                return res.json({
+                    success: true,
+                    needsClarification: true,
+                    clarifyingQuestions: aiResponse.clarifyingQuestions,
+                    message: 'Se necesita aclaración para continuar con la modificación'
+                });
+            }
 
-            const resultNodesMap = new Map(existingNodesMap);
+            // Normalizar arrays de elementos y relaciones
+            const elements = Array.isArray(aiResponse.elements) ? aiResponse.elements : [];
+            const relationships = Array.isArray(aiResponse.relationships) ? aiResponse.relationships : [];
 
-            (aiDiagram.elements || []).forEach((el, idx) => {
-                const id = el.id ? String(el.id) : `ai_${Date.now()}_${idx}`;
-                const name = el.name || el.nombre || el.title || `Clase_${idx + 1}`;
-                const attributes = Array.isArray(el.attributes) ? el.attributes : (el.attributes ? [el.attributes] : []);
-                const methods = Array.isArray(el.methods) ? el.methods : (el.methods ? [el.methods] : []);
+            console.log(`📊 Resultado IA - Elements: ${elements.length}, Relationships: ${relationships.length}`);
 
-                if (resultNodesMap.has(id)) {
-                    // update existing
-                    const existing = resultNodesMap.get(id);
-                    const updated = { ...existing, data: { ...(existing.data || {}), className: name, attributes, methods } };
-                    resultNodesMap.set(id, updated);
-                    updatedNodes.push(updated);
+            // Procesar las modificaciones comparando con el estado actual
+            const resultNodes = [];
+            const resultEdges = [];
+            
+            // Detectar eliminaciones: elementos que estaban en currentState pero no en aiResponse
+            const currentNodeIds = new Set(currentState.elements.map(e => e.id));
+            const aiNodeIds = new Set(elements.map(e => e.id));
+            const currentEdgeIds = new Set(currentState.relationships.map(r => r.id));
+            const aiEdgeIds = new Set(relationships.map(r => r.id));
+
+            let eliminatedNodes = [];
+            let eliminatedEdges = [];
+
+            // Detectar nodos eliminados
+            for (const currentElement of currentState.elements) {
+                const existsInAI = elements.some(el => 
+                    el.id === currentElement.id || 
+                    el.name.toLowerCase() === currentElement.name.toLowerCase()
+                );
+                
+                if (!existsInAI) {
+                    console.log(`🗑️ Nodo eliminado detectado: ${currentElement.name} (${currentElement.id})`);
+                    eliminatedNodes.push(currentElement);
                 } else {
-                    // add new node
-                    const nodeObj = { id, type: 'classNode', position: el.position || { x: 100 + idx * 200, y: 100 }, data: { className: name, attributes, methods, _aiSource: true } };
-                    resultNodesMap.set(id, nodeObj);
-                    addedNodes.push(nodeObj);
+                    // Mantener el nodo (puede estar actualizado)
+                    const aiElement = elements.find(el => 
+                        el.id === currentElement.id || 
+                        el.name.toLowerCase() === currentElement.name.toLowerCase()
+                    );
+                    
+                    if (aiElement) {
+                        resultNodes.push({
+                            id: currentElement.id, // Mantener ID original
+                            type: 'classNode',
+                            position: aiElement.position || currentElement.position || { x: 100, y: 100 },
+                            data: {
+                                className: aiElement.name || currentElement.name,
+                                attributes: Array.isArray(aiElement.attributes) ? aiElement.attributes : [],
+                                methods: Array.isArray(aiElement.methods) ? aiElement.methods : [],
+                                _aiModified: true
+                            }
+                        });
+                    }
                 }
-            });
+            }
 
-            const addedEdges = [];
-            const updatedEdges = [];
-            const resultEdges = Array.from(curEdges || []);
+            // Agregar nodos nuevos que aparecen en la IA pero no existían antes
+            for (const aiElement of elements) {
+                const existsInCurrent = currentState.elements.some(el => 
+                    el.id === aiElement.id || 
+                    el.name.toLowerCase() === aiElement.name.toLowerCase()
+                );
 
-            (aiDiagram.relationships || []).forEach((r, idx) => {
-                const id = r.id ? String(r.id) : `ai_rel_${Date.now()}_${idx}`;
-                let source = r.sourceId || r.source || null;
-                let target = r.targetId || r.target || null;
-
-                // Try to resolve by name if needed
-                if (source && !resultNodesMap.has(String(source))) {
-                    const found = Array.from(resultNodesMap.values()).find(n => String((n.data && n.data.className || n.name || '')).toLowerCase() === String(source).toLowerCase());
-                    if (found) source = found.id;
+                if (!existsInCurrent) {
+                    console.log(`➕ Nuevo nodo detectado: ${aiElement.name}`);
+                    resultNodes.push({
+                        id: aiElement.id || `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        type: 'classNode',
+                        position: aiElement.position || { 
+                            x: Math.random() * 600 + 100, 
+                            y: Math.random() * 400 + 100 
+                        },
+                        data: {
+                            className: aiElement.name,
+                            attributes: Array.isArray(aiElement.attributes) ? aiElement.attributes : [],
+                            methods: Array.isArray(aiElement.methods) ? aiElement.methods : [],
+                            _aiModified: true
+                        }
+                    });
                 }
-                if (target && !resultNodesMap.has(String(target))) {
-                    const found = Array.from(resultNodesMap.values()).find(n => String((n.data && n.data.className || n.name || '')).toLowerCase() === String(target).toLowerCase());
-                    if (found) target = found.id;
+            }
+
+            // Procesar relaciones de manera similar
+            const existingNodeIds = new Set(resultNodes.map(n => n.id));
+
+            for (const aiRelationship of relationships) {
+                // Verificar que tanto source como target existan en los nodos resultantes
+                let sourceId = aiRelationship.sourceId;
+                let targetId = aiRelationship.targetId;
+
+                // Intentar resolver por nombre si el ID no existe
+                if (!existingNodeIds.has(sourceId)) {
+                    const sourceNode = resultNodes.find(n => 
+                        n.data.className.toLowerCase() === sourceId.toLowerCase()
+                    );
+                    if (sourceNode) sourceId = sourceNode.id;
                 }
 
-                if (!source || !target) return; // skip invalid edge
-
-                // Check if similar edge exists
-                const exists = resultEdges.some(e => e.source === source && e.target === target && ((e.data && e.data.type) || e.type) === (r.type || r.relation || 'association'));
-                if (!exists) {
-                    const edgeObj = { id, source, target, type: 'umlEdge', data: { type: r.type || r.relation || 'association', _aiSource: true } };
-                    resultEdges.push(edgeObj);
-                    addedEdges.push(edgeObj);
-                } else {
-                    // optionally update matching edge metadata - for now skip
+                if (!existingNodeIds.has(targetId)) {
+                    const targetNode = resultNodes.find(n => 
+                        n.data.className.toLowerCase() === targetId.toLowerCase()
+                    );
+                    if (targetNode) targetId = targetNode.id;
                 }
-            });
 
-            const mergedNodes = Array.from(resultNodesMap.values());
+                if (existingNodeIds.has(sourceId) && existingNodeIds.has(targetId)) {
+                    resultEdges.push({
+                        id: aiRelationship.id || `edge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        source: sourceId,
+                        target: targetId,
+                        type: 'umlEdge',
+                        data: {
+                            type: aiRelationship.type || 'Association',
+                            _aiModified: true
+                        }
+                    });
+                }
+            }
 
-            const diff = {
-                addedNodes,
-                updatedNodes,
-                addedEdges
-            };
+            console.log(`✅ Resultado final - Nodos: ${resultNodes.length}, Edges: ${resultEdges.length}, Eliminados: ${eliminatedNodes.length}`);
 
             const response = {
                 success: true,
-                message: 'Propuesta de modificación generada (modo ' + mode + ')',
-                newState: { nodes: mergedNodes, edges: resultEdges },
-                diff,
-                clarifyingQuestions: aiDiagram.clarifyingQuestions || [],
-                warnings: []
+                message: eliminatedNodes.length > 0 
+                    ? `Modificación aplicada. ${eliminatedNodes.length} elemento(s) eliminado(s).`
+                    : 'Modificación aplicada correctamente.',
+                newState: { 
+                    nodes: resultNodes, 
+                    edges: resultEdges 
+                },
+                eliminated: {
+                    nodes: eliminatedNodes,
+                    edges: eliminatedEdges
+                },
+                clarifyingQuestions: aiResponse.clarifyingQuestions || []
             };
 
             return res.json(response);
+
         } catch (err) {
-            console.error('modifyDiagram error', err);
-            return res.status(500).json({ success: false, error: err.message || String(err) });
+            console.error('❌ ModifyDiagram error:', err);
+            return res.status(500).json({ 
+                success: false, 
+                error: `Error al procesar modificación: ${err.message || String(err)}` 
+            });
         }
     }
     // Generate UML diagram from text, voice, or image
@@ -504,8 +644,10 @@ class AIController {
                         }
                     }
                 } catch (schemaErr) {
-                    console.warn('Schema validation error:', schemaErr.message || schemaErr);
-                    throw new Error('Error validando la estructura del diagrama generado por la IA');
+                    console.error('❌ Schema validation error:', schemaErr.message || schemaErr);
+                    console.error('📄 Diagram that failed validation:', JSON.stringify(diagram, null, 2));
+                    console.error('🔍 Validation errors:', validateDiagram.errors);
+                    throw new Error(`Error validando la estructura del diagrama generado por la IA: ${schemaErr.message || schemaErr}`);
                 }
 
                 // Validate the diagram structure (legacy checks)
@@ -625,39 +767,97 @@ class AIController {
         }
     }
 
-    // Validate diagram structure
+    // Validate and normalize diagram structure
     static validateDiagramStructure(diagram) {
         if (!diagram || typeof diagram !== 'object') {
+            console.error('❌ Validation failed: diagram is not a valid object:', diagram);
             throw new Error('Diagrama no es un objeto válido');
         }
 
-        if (!Array.isArray(diagram.elements)) {
-            throw new Error('El diagrama debe tener un array de elementos');
+        // Normalizar elements
+        if (!diagram.elements) {
+            console.warn('⚠️ No elements found, initializing empty array');
+            diagram.elements = [];
+        } else if (!Array.isArray(diagram.elements)) {
+            console.warn('⚠️ Elements is not array, converting:', typeof diagram.elements);
+            diagram.elements = Object.values(diagram.elements || {});
         }
 
-        if (!Array.isArray(diagram.relationships)) {
-            throw new Error('El diagrama debe tener un array de relaciones');
+        // Normalizar relationships
+        if (!diagram.relationships) {
+            console.warn('⚠️ No relationships found, initializing empty array');
+            diagram.relationships = [];
+        } else if (!Array.isArray(diagram.relationships)) {
+            console.warn('⚠️ Relationships is not array, converting:', typeof diagram.relationships);
+            diagram.relationships = Object.values(diagram.relationships || {});
         }
 
-        // Validate each element
+        console.log(`✅ Diagram structure - Elements: ${diagram.elements.length}, Relationships: ${diagram.relationships.length}`);
+
+        // Validate and normalize each element
         diagram.elements.forEach((element, index) => {
-            if (!element.id || !element.type || !element.name) {
-                throw new Error(`Elemento ${index} no tiene id, type o name requeridos`);
+            if (!element) {
+                console.error(`❌ Element ${index} is null/undefined`);
+                throw new Error(`Elemento ${index} es null o undefined`);
             }
 
+            // Ensure required fields
+            if (!element.id) {
+                element.id = `element_${Date.now()}_${index}`;
+                console.warn(`⚠️ Element ${index} missing ID, assigned: ${element.id}`);
+            }
+
+            if (!element.type) {
+                element.type = 'classNode';
+                console.warn(`⚠️ Element ${index} missing type, assigned: classNode`);
+            }
+
+            if (!element.name) {
+                element.name = `Clase_${index + 1}`;
+                console.warn(`⚠️ Element ${index} missing name, assigned: ${element.name}`);
+            }
+
+            // Normalize attributes
             if (!Array.isArray(element.attributes)) {
-                element.attributes = [];
+                if (element.attributes) {
+                    element.attributes = [String(element.attributes)];
+                } else {
+                    element.attributes = [];
+                }
             }
 
+            // Normalize methods
             if (!Array.isArray(element.methods)) {
-                element.methods = [];
+                if (element.methods) {
+                    element.methods = [String(element.methods)];
+                } else {
+                    element.methods = [];
+                }
             }
 
-            if (!element.position) {
+            // Ensure position
+            if (!element.position || typeof element.position !== 'object') {
                 element.position = { x: 100 + (index * 200), y: 100 };
             }
         });
 
+        // Validate relationships
+        diagram.relationships.forEach((rel, index) => {
+            if (!rel) {
+                console.error(`❌ Relationship ${index} is null/undefined`);
+                return; // Skip null relationships
+            }
+
+            if (!rel.id) {
+                rel.id = `rel_${Date.now()}_${index}`;
+            }
+
+            if (!rel.type) {
+                rel.type = 'Association';
+            }
+        });
+
+        console.log('✅ Diagram validation completed successfully');
         return true;
     }
 

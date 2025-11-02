@@ -213,28 +213,78 @@ function ClassNode({ data, isConnectable }) {
       </div>
 
       {/* Atributos */}
-      {data.attributes && data.attributes.length > 0 && (
-        <div className="class-attributes">
-          <h4>Atributos:</h4>
-          <ul>
-            {data.attributes.map((attr, idx) => (
-              <li key={idx}>{attr}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {(() => {
+        // Normalizar attributes a array de strings
+        const normalizeToStringArray = (maybeArray) => {
+          if (!maybeArray) return [];
+          if (!Array.isArray(maybeArray)) return [String(maybeArray)];
+          return maybeArray.map(item => {
+            if (item === null || item === undefined) return '';
+            if (typeof item === 'string') return item;
+            if (typeof item === 'object') {
+              try {
+                // Si es un objeto con propiedades específicas, formatear
+                if (item.name && item.type) return `${item.name}: ${item.type}`;
+                if (item.name) return item.name;
+                return JSON.stringify(item);
+              } catch (e) {
+                return String(item);
+              }
+            }
+            return String(item);
+          }).filter(item => item !== '');
+        };
+
+        const normalizedAttributes = normalizeToStringArray(data.attributes);
+        
+        return normalizedAttributes.length > 0 && (
+          <div className="class-attributes">
+            <h4>Atributos:</h4>
+            <ul>
+              {normalizedAttributes.map((attr, idx) => (
+                <li key={idx}>{attr}</li>
+              ))}
+            </ul>
+          </div>
+        );
+      })()}
 
       {/* Métodos */}
-      {data.methods && data.methods.length > 0 && (
-        <div className="class-methods">
-          <h4>Métodos:</h4>
-          <ul>
-            {data.methods.map((method, idx) => (
-              <li key={idx}>{method}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {(() => {
+        // Normalizar methods a array de strings
+        const normalizeToStringArray = (maybeArray) => {
+          if (!maybeArray) return [];
+          if (!Array.isArray(maybeArray)) return [String(maybeArray)];
+          return maybeArray.map(item => {
+            if (item === null || item === undefined) return '';
+            if (typeof item === 'string') return item;
+            if (typeof item === 'object') {
+              try {
+                // Si es un objeto con propiedades específicas, formatear
+                if (item.name && item.returnType) return `${item.name}(): ${item.returnType}`;
+                if (item.name) return `${item.name}()`;
+                return JSON.stringify(item);
+              } catch (e) {
+                return String(item);
+              }
+            }
+            return String(item);
+          }).filter(item => item !== '');
+        };
+
+        const normalizedMethods = normalizeToStringArray(data.methods);
+        
+        return normalizedMethods.length > 0 && (
+          <div className="class-methods">
+            <h4>Métodos:</h4>
+            <ul>
+              {normalizedMethods.map((method, idx) => (
+                <li key={idx}>{method}</li>
+              ))}
+            </ul>
+          </div>
+        );
+      })()}
     </div>
   );
 }

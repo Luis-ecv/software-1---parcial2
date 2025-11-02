@@ -10,7 +10,7 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
   const fileRef = useRef(null);
   const imageInputRef = useRef(null);
 
-  // mode: 'text' | 'voice' | 'image'
+  // mode: 'text' | 'voice' | 'image' | 'edit'
   const [mode, setMode] = useState('text');
   const [editedDiagram, setEditedDiagram] = useState(null);
   const [editWarnings, setEditWarnings] = useState([]);
@@ -18,6 +18,10 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
   const recordedChunksRef = useRef([]);
+
+  // Estados para manejo de clarificaciones en modificaciones
+  const [pendingClarification, setPendingClarification] = useState(null);
+  const [clarificationResponse, setClarificationResponse] = useState('');
 
   // Initialize editedDiagram when entering 'edit' mode based on the last AI diagram message
   useEffect(() => {
@@ -440,200 +444,321 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
               )}
 
               {mode === 'edit' && (
-                // Make the edit panel scrollable so controls don't overlap on small screens
                 <div className="text-sm max-h-72 overflow-y-auto pr-2" style={{ maxHeight: '42vh' }}>
-                  {/* Find the last AI message that contains a diagram */}
+                  {/* Verificar si hay un diagrama existente para modificar */}
                   {(() => {
-                    const last = [...messages].reverse().find(m => m.role === 'ai' && m.diagram && (m.diagram.elements||[]).length > 0);
-                    if (!last) {
+                    // Buscar el último diagrama generado por IA o usar el estado actual del board
+                    const hasCurrentDiagram = nodes && nodes.length > 0;
+                    const lastAiMessage = [...messages].reverse().find(m => m.role === 'ai' && m.diagram && (m.diagram.elements||[]).length > 0);
+                    
+                    if (!hasCurrentDiagram && !lastAiMessage) {
                       return (
-                        <div className="p-3 bg-yellow-50 border rounded text-xs text-yellow-800">No hay un diagrama generado por la IA para editar. Genera primero un diagrama desde la pestaña 'Texto' / 'Imagen' / 'Voz'.</div>
+                        <div className="p-3 bg-yellow-50 border rounded text-xs text-yellow-800">
+                          No hay un diagrama disponible para modificar. Genera primero un diagrama o crea clases en el board.
+                        </div>
                       );
-                    }
-
-                    if (!editedDiagram) {
-                      return (<div className="p-3 text-xs text-gray-500">Preparando editor…</div>);
                     }
 
                     return (
                       <div>
-                        {/* Prompt-driven proposal UI (dry-run) */}
-                        <div className="mb-2 p-2 bg-white border rounded text-xs">
-                          <div className="text-xs font-semibold mb-1">Proponer cambios vía IA (previsualización)</div>
-                          <textarea className="w-full border rounded p-2 text-sm h-20 mb-2" placeholder="Escribe un prompt que describa los cambios que quieres (por ejemplo: añadir total a Pedido, relacionar Usuario con Direccion)" onChange={(e) => { /* ephemeral local */ }} id="ia-proposal-prompt" />
+                        {/* Sistema de Modificación del Diagrama */}
+                        <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded">
+                          <div className="text-sm font-semibold text-indigo-800 mb-2">🔧 Modificación Inteligente del Diagrama</div>
+                          <div className="text-xs text-indigo-600 mb-3">
+                            Describe los cambios que quieres hacer. Ejemplos: "elimina la clase Cliente", "añade atributo nombre a Usuario"
+                          </div>
+                          
+                          <textarea 
+                            className="w-full border border-indigo-200 rounded p-3 text-sm h-24 mb-3 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" 
+                            placeholder="Describe la modificación que quieres realizar...&#10;• elimina la clase Cliente&#10;• añade atributo email tipo string a Usuario&#10;• crea relación entre Pedido y Cliente&#10;• actualiza el método calcular en Factura"
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                          />
+                          
+                          {/* Botón principal de modificación */}
                           <div className="flex gap-2 justify-end">
-                            <button className="px-3 py-1 bg-indigo-600 text-white rounded text-sm" disabled={proposalLoading} onClick={async () => {
-                              const ta = document.getElementById('ia-proposal-prompt');
-                              const prompt = ta ? ta.value.trim() : '';
-                              if (!prompt) {
-                                pushMessage({ role: 'ai', text: 'Introduce un prompt para que la IA proponga cambios.' });
-                                return;
-                              }
-                              setProposalLoading(true);
-                              try {
-                                // send current board state + prompt to backend dry-run
-                                const curNodes = (nodes || []).map(n => ({ id: n.id, data: n.data }));
-                                const curEdges = (edges || []).map(e => ({ id: e.id, source: e.source, target: e.target, data: e.data }));
-                                const resp = await modifyDiagram({ prompt, nodes: curNodes, edges: curEdges, mode: 'merge', dryRun: true });
-                                if (!resp || !resp.success) {
-                                  pushMessage({ role: 'ai', text: 'La IA no pudo generar una propuesta: ' + (resp && resp.error ? resp.error : JSON.stringify(resp)) });
-                                  setProposalLoading(false);
+                            <button 
+                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm font-medium transition-colors" 
+                              disabled={loading || !input.trim()} 
+                              onClick={async () => {
+                                const prompt = input.trim();
+                                if (!prompt) {
+                                  pushMessage({ role: 'ai', text: 'Por favor describe la modificación que quieres realizar.' });
                                   return;
                                 }
-
-                                // Load the proposed newState into the editor as a preview (do not apply to board)
-                                const ns = resp.newState || {};
-                                const proposal = {
-                                  _sourceTs: Date.now(),
-                                  nodes: (ns.nodes || []).map((n, i) => ({ id: n.id || `p_${i}_${Date.now()}`, name: n.data?.className || n.name || `Clase_${i+1}`, attributes: Array.isArray(n.data?.attributes) ? n.data.attributes : (n.data?.attributes ? [String(n.data.attributes)] : []), methods: Array.isArray(n.data?.methods) ? n.data.methods : (n.data?.methods ? [String(n.data.methods)] : []) })),
-                                  edges: (ns.edges || []).map((e, i) => ({ id: e.id || `pe_${i}_${Date.now()}`, sourceId: e.source, targetId: e.target, type: e.data?.type || e.type || 'Association' }))
-                                };
-                                setEditedDiagram(proposal);
-                                setEditWarnings((resp.clarifyingQuestions || []).slice(0,5));
-                                pushMessage({ role: 'ai', text: resp.message || 'Propuesta generada por IA', diagram: { elements: ns.nodes || [], relationships: ns.edges || [], clarifyingQuestions: resp.clarifyingQuestions || [] } });
-                              } catch (err) {
-                                console.error('proposal error', err);
-                                pushMessage({ role: 'ai', text: 'Error al solicitar la propuesta: ' + (err.message || err) });
-                              } finally {
-                                setProposalLoading(false);
-                              }
-                            }}>{proposalLoading ? 'Generando…' : 'Generar propuesta IA'}</button>
+                                
+                                setLoading(true);
+                                pushMessage({ role: 'user', text: prompt });
+                                
+                                try {
+                                  // Preparar el estado actual del diagrama
+                                  const currentNodes = (nodes || []).map(n => ({ 
+                                    id: n.id, 
+                                    data: {
+                                      className: n.data?.className || 'Clase',
+                                      attributes: n.data?.attributes || [],
+                                      methods: n.data?.methods || []
+                                    }
+                                  }));
+                                  
+                                  const currentEdges = (edges || []).map(e => ({ 
+                                    id: e.id, 
+                                    source: e.source, 
+                                    target: e.target, 
+                                    data: { type: e.data?.type || 'Association' }
+                                  }));
+                                  
+                                  // Llamar al servicio de modificación
+                                  const response = await modifyDiagram({ 
+                                    prompt, 
+                                    nodes: currentNodes, 
+                                    edges: currentEdges,
+                                    mode: 'modify'
+                                  });
+                                  
+                                  if (!response || !response.success) {
+                                    const errorMsg = response?.error || 'Error desconocido en la modificación';
+                                    pushMessage({ role: 'ai', text: `❌ Error: ${errorMsg}` });
+                                    return;
+                                  }
+                                  
+                                  // Verificar si la IA necesita aclaración
+                                  if (response.needsClarification && response.clarifyingQuestions && response.clarifyingQuestions.length > 0) {
+                                    // Mostrar las preguntas clarificadoras
+                                    const questionsText = response.clarifyingQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n');
+                                    pushMessage({ 
+                                      role: 'ai', 
+                                      text: `🤔 Necesito más información:\n\n${questionsText}\n\nPor favor responde para continuar con la modificación.`,
+                                      needsClarification: true,
+                                      originalPrompt: prompt,
+                                      clarifyingQuestions: response.clarifyingQuestions
+                                    });
+                                    setInput(''); // Limpiar para la respuesta
+                                    return;
+                                  }
+                                  
+                                  // Aplicar los cambios directamente al diagrama
+                                  if (response.newState) {
+                                    const { nodes: newNodes, edges: newEdges } = response.newState;
+                                    
+                                    // Convertir los nodos al formato de React Flow
+                                    const updatedNodes = (newNodes || []).map((node, index) => ({
+                                      id: node.id || `node_${Date.now()}_${index}`,
+                                      type: 'classNode',
+                                      position: node.position || { 
+                                        x: Math.random() * 600 + 100, 
+                                        y: Math.random() * 400 + 100 
+                                      },
+                                      data: {
+                                        className: node.data?.className || node.name || 'Clase',
+                                        attributes: normalizeStringArray(node.data?.attributes),
+                                        methods: normalizeStringArray(node.data?.methods),
+                                        _aiModified: true
+                                      }
+                                    }));
+                                    
+                                    // Convertir las edges al formato de React Flow
+                                    const updatedEdges = (newEdges || []).map((edge, index) => ({
+                                      id: edge.id || `edge_${Date.now()}_${index}`,
+                                      source: edge.source,
+                                      target: edge.target,
+                                      type: 'umlEdge',
+                                      data: {
+                                        type: edge.data?.type || 'Association',
+                                        _aiModified: true
+                                      }
+                                    }));
+                                    
+                                    // Actualizar el estado del diagrama
+                                    setNodes(updatedNodes);
+                                    setEdges(updatedEdges);
+                                    
+                                    // Persistir los cambios
+                                    if (typeof updateBoardData === 'function') {
+                                      await updateBoardData(updatedNodes, updatedEdges);
+                                    }
+                                    
+                                    pushMessage({ 
+                                      role: 'ai', 
+                                      text: `✅ ${response.message || 'Diagrama modificado correctamente'}`,
+                                      diagram: { elements: updatedNodes, relationships: updatedEdges }
+                                    });
+                                  } else {
+                                    pushMessage({ role: 'ai', text: response.message || 'Modificación completada' });
+                                  }
+                                  
+                                  setInput(''); // Limpiar el campo de entrada
+                                  
+                                } catch (err) {
+                                  console.error('Error en modificación:', err);
+                                  pushMessage({ 
+                                    role: 'ai', 
+                                    text: `❌ Error al procesar la modificación: ${err.message || err}` 
+                                  });
+                                } finally {
+                                  setLoading(false);
+                                }
+                              }}
+                            >
+                              {loading ? '🔄 Procesando...' : '🚀 Modificar Diagrama'}
+                            </button>
                           </div>
                         </div>
-                        <div className="mb-2 text-xs text-gray-600">Edita los nombres, atributos y métodos. Cuando termines pulsa <strong>Aplicar cambios</strong>.</div>
-                        {editWarnings.length > 0 && (
-                          <div className="mb-2 text-xs text-red-600">{editWarnings.join(' — ')}</div>
-                        )}
-
-                        {/* Nodes editor */}
-                        <div className="max-h-48 overflow-y-auto mb-2 border rounded p-2 bg-gray-50">
-                          <div className="text-xs font-semibold mb-1">Clases ({(editedDiagram && editedDiagram.nodes.length) || 0})</div>
-                          {(editedDiagram && editedDiagram.nodes.length > 0) ? editedDiagram.nodes.map((n, idx) => (
-                            <div key={n.id} className="mb-2 p-2 bg-white border rounded text-xs">
-                              <div className="flex items-center gap-2 mb-1">
-                                <input className="flex-1 border rounded px-2 py-1 text-sm" value={n.name} onChange={(e) => {
-                                  const v = e.target.value;
-                                  setEditedDiagram(prev => ({ ...prev, nodes: prev.nodes.map(x => x.id === n.id ? { ...x, name: v } : x) }));
-                                }} />
-                                <button className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded" onClick={() => {
-                                  // remove class
-                                  setEditedDiagram(prev => ({ ...prev, nodes: prev.nodes.filter(x => x.id !== n.id), edges: prev.edges.filter(e => e.sourceId !== n.id && e.targetId !== n.id) }));
-                                }}>Eliminar</button>
+                        
+                        {/* Panel de Clarificaciones Interactivas */}
+                        {(() => {
+                          const lastMessage = messages[messages.length - 1];
+                          if (lastMessage && lastMessage.needsClarification) {
+                            return (
+                              <div className="mb-3 p-3 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 rounded">
+                                <div className="text-sm font-semibold text-amber-800 mb-2">🤔 Se necesita aclaración</div>
+                                <div className="text-xs text-amber-700 mb-3 whitespace-pre-line">
+                                  {lastMessage.clarifyingQuestions?.map((q, i) => (
+                                    <div key={i} className="mb-1">• {q}</div>
+                                  ))}
+                                </div>
+                                
+                                <textarea 
+                                  className="w-full border border-amber-200 rounded p-2 text-sm h-16 mb-2 focus:ring-2 focus:ring-amber-400 focus:border-amber-400" 
+                                  placeholder="Responde a las preguntas para continuar con la modificación..."
+                                  value={clarificationResponse}
+                                  onChange={(e) => setClarificationResponse(e.target.value)}
+                                />
+                                
+                                <div className="flex gap-2 justify-end">
+                                  <button 
+                                    className="px-3 py-1 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded text-sm" 
+                                    onClick={() => {
+                                      setPendingClarification(null);
+                                      setClarificationResponse('');
+                                      pushMessage({ role: 'ai', text: '❌ Modificación cancelada por el usuario.' });
+                                    }}
+                                  >
+                                    Cancelar
+                                  </button>
+                                  <button 
+                                    className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-sm" 
+                                    disabled={loading || !clarificationResponse.trim()}
+                                    onClick={async () => {
+                                      if (!clarificationResponse.trim()) return;
+                                      
+                                      setLoading(true);
+                                      pushMessage({ role: 'user', text: clarificationResponse });
+                                      
+                                      try {
+                                        // Preparar el contexto completo para la clarificación
+                                        const currentNodes = (nodes || []).map(n => ({ 
+                                          id: n.id, 
+                                          data: {
+                                            className: n.data?.className || 'Clase',
+                                            attributes: n.data?.attributes || [],
+                                            methods: n.data?.methods || []
+                                          }
+                                        }));
+                                        
+                                        const currentEdges = (edges || []).map(e => ({ 
+                                          id: e.id, 
+                                          source: e.source, 
+                                          target: e.target, 
+                                          data: { type: e.data?.type || 'Association' }
+                                        }));
+                                        
+                                        // Enviar prompt original + respuesta de clarificación
+                                        const fullPrompt = `${lastMessage.originalPrompt}\n\nACLARACIÓN: ${clarificationResponse}`;
+                                        
+                                        const response = await modifyDiagram({ 
+                                          prompt: fullPrompt,
+                                          nodes: currentNodes, 
+                                          edges: currentEdges,
+                                          mode: 'modify',
+                                          clarification: clarificationResponse,
+                                          originalPrompt: lastMessage.originalPrompt
+                                        });
+                                        
+                                        if (!response || !response.success) {
+                                          const errorMsg = response?.error || 'Error desconocido en la modificación';
+                                          pushMessage({ role: 'ai', text: `❌ Error: ${errorMsg}` });
+                                          return;
+                                        }
+                                        
+                                        // Aplicar los cambios
+                                        if (response.newState) {
+                                          const { nodes: newNodes, edges: newEdges } = response.newState;
+                                          
+                                          const updatedNodes = (newNodes || []).map((node, index) => ({
+                                            id: node.id || `node_${Date.now()}_${index}`,
+                                            type: 'classNode',
+                                            position: node.position || { 
+                                              x: Math.random() * 600 + 100, 
+                                              y: Math.random() * 400 + 100 
+                                            },
+                                            data: {
+                                              className: node.data?.className || node.name || 'Clase',
+                                              attributes: normalizeStringArray(node.data?.attributes),
+                                              methods: normalizeStringArray(node.data?.methods),
+                                              _aiModified: true
+                                            }
+                                          }));
+                                          
+                                          const updatedEdges = (newEdges || []).map((edge, index) => ({
+                                            id: edge.id || `edge_${Date.now()}_${index}`,
+                                            source: edge.source,
+                                            target: edge.target,
+                                            type: 'umlEdge',
+                                            data: {
+                                              type: edge.data?.type || 'Association',
+                                              _aiModified: true
+                                            }
+                                          }));
+                                          
+                                          setNodes(updatedNodes);
+                                          setEdges(updatedEdges);
+                                          
+                                          if (typeof updateBoardData === 'function') {
+                                            await updateBoardData(updatedNodes, updatedEdges);
+                                          }
+                                          
+                                          pushMessage({ 
+                                            role: 'ai', 
+                                            text: `✅ ${response.message || 'Diagrama modificado correctamente con las aclaraciones proporcionadas'}`,
+                                            diagram: { elements: updatedNodes, relationships: updatedEdges }
+                                          });
+                                        } else {
+                                          pushMessage({ role: 'ai', text: response.message || 'Modificación completada con aclaraciones' });
+                                        }
+                                        
+                                        // Limpiar estados de clarificación
+                                        setPendingClarification(null);
+                                        setClarificationResponse('');
+                                        
+                                      } catch (err) {
+                                        console.error('Error en clarificación:', err);
+                                        pushMessage({ 
+                                          role: 'ai', 
+                                          text: `❌ Error al procesar la aclaración: ${err.message || err}` 
+                                        });
+                                      } finally {
+                                        setLoading(false);
+                                      }
+                                    }}
+                                  >
+                                    {loading ? '🔄 Aplicando...' : '✅ Continuar'}
+                                  </button>
+                                </div>
                               </div>
-                              <div className="mb-1">
-                                <div className="text-[11px] text-gray-500 mb-1">Atributos (separados por coma)</div>
-                                <input className="w-full border rounded px-2 py-1 text-sm" value={(n.attributes || []).join(', ')} onChange={(e) => {
-                                  const arr = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
-                                  setEditedDiagram(prev => ({ ...prev, nodes: prev.nodes.map(x => x.id === n.id ? { ...x, attributes: arr } : x) }));
-                                }} />
-                              </div>
-                              <div>
-                                <div className="text-[11px] text-gray-500 mb-1">Métodos (separados por coma)</div>
-                                <input className="w-full border rounded px-2 py-1 text-sm" value={(n.methods || []).join(', ')} onChange={(e) => {
-                                  const arr = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
-                                  setEditedDiagram(prev => ({ ...prev, nodes: prev.nodes.map(x => x.id === n.id ? { ...x, methods: arr } : x) }));
-                                }} />
-                              </div>
-                            </div>
-                          )) : <div className="text-xs text-gray-500">No hay clases para editar.</div>}
-                          <div className="mt-2">
-                            <button className="px-3 py-1 bg-indigo-600 text-white rounded text-sm" onClick={() => {
-                              // Add new class
-                              const nid = `ai_new_${Date.now()}`;
-                              setEditedDiagram(prev => ({ ...prev, nodes: [...prev.nodes, { id: nid, name: `NuevaClase${prev.nodes.length+1}`, attributes: [], methods: [] }] }));
-                            }}>Añadir clase</button>
+                            );
+                          }
+                          return null;
+                        })()}
+                        
+                        {/* Información de estado del diagrama */}
+                        <div className="mt-3 p-2 bg-gray-50 border rounded text-xs">
+                          <div className="font-semibold text-gray-700 mb-1">📊 Estado actual del diagrama:</div>
+                          <div className="text-gray-600">
+                            • <strong>{(nodes || []).length}</strong> clases en el board
+                            • <strong>{(edges || []).length}</strong> relaciones
+                            • <strong>{messages.filter(m => m.role === 'ai' && m.diagram).length}</strong> diagramas generados por IA
                           </div>
-                        </div>
-
-                        {/* Edges preview */}
-                        <div className="mb-2 text-xs">
-                          <div className="font-semibold mb-1">Relaciones ({(editedDiagram && editedDiagram.edges.length) || 0})</div>
-                          {(editedDiagram && editedDiagram.edges.length > 0) ? editedDiagram.edges.map((r) => (
-                            <div key={r.id} className="mb-1 text-xs flex items-center gap-2">
-                              <div className="flex-1">{r.sourceId} → {r.targetId} ({r.type})</div>
-                              <button className="px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded" onClick={() => {
-                                setEditedDiagram(prev => ({ ...prev, edges: prev.edges.filter(x => x.id !== r.id) }));
-                              }}>Eliminar</button>
-                            </div>
-                          )) : <div className="text-xs text-gray-500">No hay relaciones para editar.</div>}
-                        </div>
-
-                        <div className="flex justify-end gap-2">
-                          <button className="px-3 py-1 bg-gray-100 text-gray-800 rounded text-sm" onClick={() => {
-                            // discard edits
-                            setEditedDiagram(null);
-                            pushMessage({ role: 'ai', text: 'Edición descartada.' });
-                            setMode('text');
-                          }}>Cancelar</button>
-                          <button className="px-3 py-1 bg-green-600 text-white rounded text-sm" onClick={async () => {
-                            // Apply edits to board
-                            try {
-                              if (!editedDiagram) return;
-                              // Build updated nodes and edges arrays based on existing board state
-                              const updatedNodesMap = new Map((nodes || []).map(n => [n.id, n]));
-                              for (const en of editedDiagram.nodes) {
-                                const existing = updatedNodesMap.get(en.id);
-                                const nodeObj = existing ? { ...existing, data: { ...(existing.data || {}), className: en.name, attributes: en.attributes || [], methods: en.methods || [] } } : {
-                                  id: en.id,
-                                  type: 'classNode',
-                                  position: { x: Math.random() * 600 + 50, y: Math.random() * 400 + 50 },
-                                  data: { className: en.name, attributes: en.attributes || [], methods: en.methods || [], _aiSource: true }
-                                };
-                                updatedNodesMap.set(en.id, nodeObj);
-                              }
-                              // Remove nodes that were deleted in editedDiagram
-                              const editedIds = new Set(editedDiagram.nodes.map(n => n.id));
-                              for (const id of Array.from(updatedNodesMap.keys())) {
-                                // If the id existed in the board but was removed in the edited diagram and it was part of the AI diagram, remove it
-                                const wasAi = (nodes || []).some(n => n.id === id && n.data && n.data._aiSource);
-                                if (wasAi && !editedIds.has(id)) {
-                                  updatedNodesMap.delete(id);
-                                }
-                              }
-
-                              // Edges: start from current edges, remove those referencing removed nodes, and add new/keep existing
-                              let updatedEdges = (edges || []).filter(e => updatedNodesMap.has(e.source) && updatedNodesMap.has(e.target));
-                              // Add any edges from editedDiagram that are new
-                              for (const re of editedDiagram.edges) {
-                                if (!re.sourceId || !re.targetId) continue;
-                                // resolve source/target ids if names provided
-                                const src = updatedNodesMap.has(re.sourceId) ? re.sourceId : (Array.from(updatedNodesMap.values()).find(n => n.data.className.toLowerCase() === String(re.sourceId).toLowerCase()) || {}).id;
-                                const tgt = updatedNodesMap.has(re.targetId) ? re.targetId : (Array.from(updatedNodesMap.values()).find(n => n.data.className.toLowerCase() === String(re.targetId).toLowerCase()) || {}).id;
-                                if (!src || !tgt) continue;
-                                const exists = updatedEdges.some(e => e.source === src && e.target === tgt && (e.data && e.data.type || 'Association') === re.type);
-                                if (!exists) {
-                                  updatedEdges.push({ id: re.id || `edge_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, source: src, target: tgt, type: 'umlEdge', data: { type: re.type || 'Association', _aiSource: true } });
-                                }
-                              }
-
-                              let finalNodes = Array.from(updatedNodesMap.values());
-                              // Normalize attributes/methods to strings to avoid React rendering objects
-                              finalNodes = finalNodes.map(n => ({
-                                ...n,
-                                data: {
-                                  ...(n.data || {}),
-                                  attributes: normalizeStringArray((n.data || {}).attributes),
-                                  methods: normalizeStringArray((n.data || {}).methods)
-                                }
-                              }));
-
-                              // Update local state
-                              setNodes(finalNodes);
-                              setEdges(updatedEdges);
-
-                              // Persist via updateBoardData if available
-                              if (typeof updateBoardData === 'function') {
-                                await updateBoardData(finalNodes, updatedEdges);
-                              }
-
-                              pushMessage({ role: 'ai', text: 'Cambios aplicados al diagrama.' });
-                              setEditedDiagram(null);
-                              setMode('text');
-                            } catch (err) {
-                              console.error('Error al aplicar edición', err);
-                              pushMessage({ role: 'ai', text: 'Error al aplicar cambios: ' + (err.message || err) });
-                            }
-                          }}>Aplicar cambios</button>
                         </div>
                       </div>
                     );
@@ -663,7 +788,13 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
           {/* Footer */}
           <div className="px-3 py-2 bg-gradient-to-r from-indigo-400 to-purple-600 flex items-center gap-2">
             <div className="flex-1">
-              <div className="text-white text-sm">{mode === 'text' ? 'Texto' : mode === 'voice' ? 'Nota de voz' : 'Imagen'}</div>
+              <div className="text-white text-sm">
+                {mode === 'text' ? 'Texto' : 
+                 mode === 'voice' ? 'Nota de voz' : 
+                 mode === 'image' ? 'Imagen' : 
+                 mode === 'edit' ? 'Modificar Diagrama' : 
+                 'IA Assistant'}
+              </div>
             </div>
             <div>
               <button onClick={handleSend} disabled={loading} className="bg-white text-indigo-700 px-3 py-1 rounded-full">

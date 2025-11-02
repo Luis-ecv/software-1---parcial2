@@ -57,24 +57,58 @@ export async function generateDiagram({ type = 'text', content = '', file = null
   }
 }
 
-export async function modifyDiagram({ prompt, nodes = [], edges = [], mode = 'merge', dryRun = true } = {}) {
-  const base = API_BASE;
-  const url = `${base.replace(/\/$/, '')}/apis/ai/modify-diagram`;
-    try {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, nodes, edges, mode, dryRun }),
-      });
+export async function modifyDiagram({ 
+  prompt, 
+  nodes = [], 
+  edges = [], 
+  mode = 'modify', 
+  dryRun = false, 
+  clarification = null, 
+  originalPrompt = null, 
+  salaId = null 
+} = {}) {
+  const url = `${API_BASE}/apis/ai/modify-diagram`;
+  
+  try {
+    const requestBody = {
+      prompt,
+      nodes,
+      edges,
+      mode,
+      dryRun,
+      salaId
+    };
 
-      if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(`AI server error: ${resp.status} ${text}`);
-      }
-      const json = await resp.json();
-      return json;
-    } catch (err) {
-      console.error('modifyDiagram error', err);
-      throw err;
+    // Agregar información de clarificación si está disponible
+    if (clarification) {
+      requestBody.clarification = clarification;
     }
+    if (originalPrompt) {
+      requestBody.originalPrompt = originalPrompt;
+    }
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      credentials: 'include', // Importante para autenticación
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      let parsed = text;
+      try { 
+        parsed = JSON.parse(text); 
+      } catch (e) { 
+        // mantener texto original si no es JSON válido
+      }
+      const errMsg = parsed && parsed.error ? parsed.error : parsed;
+      throw new Error(`AI server error: ${resp.status} ${errMsg}`);
+    }
+
+    return await resp.json();
+  } catch (error) {
+    console.error('modifyDiagram error', error);
+    throw error;
+  }
 }
