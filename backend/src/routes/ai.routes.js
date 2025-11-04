@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import AIController from '../controllers/ai.controller.js';
+import AIImageController from '../controllers/ai.image.controller.js';
 
 const router = express.Router();
 
@@ -66,7 +67,32 @@ const handleMultipleFormats = (req, res, next) => {
 };
 
 // Routes
-router.post('/generate-diagram', handleMultipleFormats, AIController.generateDiagram);
+// Route: delegate image uploads to AIImageController and keep other types handled
+// by AIController. NOTE: We do NOT modify `ai.controller.js` per project requirement.
+router.post('/generate-diagram', handleMultipleFormats, (req, res, next) => {
+    try {
+        // If the request was a multipart upload with an image, forward to image controller
+        const isImage = (req.files && req.files.image) || req.body.type === 'image';
+        if (isImage) {
+            return AIImageController.processImageInput(req, res, next);
+        }
+        // Otherwise, fallback to the existing AIController (text/voice)
+        return AIController.generateDiagram(req, res, next);
+    } catch (err) {
+        next(err);
+    }
+});
+
+// New dedicated route for image-based diagram generation.
+// This ensures frontend image uploads can call a specific endpoint that
+// is handled entirely by AIImageController and does not touch ai.controller.js.
+router.post('/generate-diagram/image', handleMultipleFormats, (req, res, next) => {
+    try {
+        return AIImageController.processImageInput(req, res, next);
+    } catch (err) {
+        next(err);
+    }
+});
 router.get('/features', AIController.getAIFeatures);
 
 // Dry-run modify: accepts current nodes/edges + prompt and returns a proposed merged state (does not apply changes)

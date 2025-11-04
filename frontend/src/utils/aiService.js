@@ -5,7 +5,10 @@
 const API_BASE = import.meta.env.VITE_API_BASE || import.meta.env.VITE_WS_URL || 'http://localhost:8083';
 
 export async function generateDiagram({ type = 'text', content = '', file = null, salaId = null }) {
-  const url = `${API_BASE}/apis/ai/generate-diagram`;
+  // Use a dedicated image endpoint for image uploads so frontend does not depend
+  // on ai.controller.js for image processing. Non-image requests still use
+  // the generic generate-diagram endpoint handled by ai.controller.js.
+  const url = (file && type === 'image') ? `${API_BASE}/apis/ai/generate-diagram/image` : `${API_BASE}/apis/ai/generate-diagram`;
 
   try {
     if (file) {
