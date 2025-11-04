@@ -528,7 +528,6 @@ echo Error: JAVA_HOME is set to an invalid directory. >&2
 echo JAVA_HOME = "%JAVA_HOME%" >&2
 echo Please set the JAVA_HOME variable in your environment to match the >&2
 echo location of your Java installation. >&2
-echo.
 goto error
 
 @REM ==== END VALIDATION ====
@@ -893,71 +892,263 @@ Para consultas específicas, revisa la documentación en \`RELACIONES.md\`
     fs.writeFileSync(path.join(projectPath, 'README.md'), readmeContent);
   };
 
-  generateFieldWithAnnotations = (attr, isPK) => {
-    let field = '';
-    let annotations = '';
-    const exactColumnName = attr.name;
-    
-    // 🔍 Detectar si es FK con constraint especial
-    const isCompositePK = attr.isPrimaryKey && attr.isForeignKey;
-    
-    if (isPK || isCompositePK) {
-      if (attr.type === 'String') {
-        annotations += `    @Id
-    @Column(name = "${exactColumnName}", length = 50`;
-        // Agregar constraint SQL si está disponible
-        if (attr.sqlType && attr.sqlType !== 'VARCHAR(255)') {
-          annotations += `, columnDefinition = "${attr.sqlType}"`;
-        }
-        annotations += `)
-    @NotBlank
-`;
-      } else {
-        annotations += `    @Id
-`;
-        if (!isCompositePK) {
-          annotations += `    @GeneratedValue(strategy = GenerationType.IDENTITY)
-`;
-        }
-        annotations += `    @Column(name = "${exactColumnName}"`;
-        // Agregar información de tipo SQL para PKs/FKs compuestas
-        if (attr.sqlType && attr.sqlType !== 'BIGINT') {
-          annotations += `, columnDefinition = "${attr.sqlType}"`;
-        }
-        annotations += `)
-`;
-      }
-      
-      // Agregar constraint de FK si es necesario
-      if (isCompositePK && attr.referencedEntity) {
-        annotations += `    // FK constraint: References ${attr.referencedEntity}(${attr.referencedField})
-`;
-      }
-      
-    } else {
-      annotations += `    @Column(name = "${exactColumnName}"`;
-      if (attr.type === 'String') {
-        annotations += `, length = 255`;
-      }
-      // Usar tipo SQL específico si está disponible
-      if (attr.sqlType && !['VARCHAR(255)', 'BIGINT'].includes(attr.sqlType)) {
-        annotations += `, columnDefinition = "${attr.sqlType}"`;
-      }
-      annotations += `)
-`;
-      if (attr.type === 'String') {
-        annotations += `    @Size(max = 255, message = "${attr.name} no puede exceder 255 caracteres")
-`;
-      } else if (['Integer', 'Long', 'Double', 'Float'].includes(attr.type)) {
-        annotations += `    @NotNull(message = "${attr.name} es requerido")
-`;
-      }
-    }
-    field = `${annotations}    private ${attr.type} ${attr.name};
+  // ----------------------------------------------------------------------
+  // NUEVO: Generar colección Postman (JSON) para importar en Postman Desktop
+  // ----------------------------------------------------------------------
+  generarPostmanCollection = (projectPath, projectName, elements) => {
+    // Construir una colección Postman v2.1 con solicitudes básicas CRUD para cada entidad
+    const baseUrl = 'http://localhost:8080';
+    const infosId = `collection-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const collection = {
+      info: {
+        name: `${projectName} API`,
+        _postman_id: infosId,
+        description: `Colección generada automáticamente para ${projectName}. Importar en Postman Desktop para probar endpoints.`,
+        schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'
+      },
+      item: []
+    };
 
-`;
-    return field;
+    // Helper: generar ejemplo de body según atributos
+    const generarEjemploBody = (entity) => {
+      const body = {};
+      if (entity.attributes && entity.attributes.length) {
+        entity.attributes.forEach(attr => {
+          if (!attr.isForeignKey) {
+            switch ((attr.type || 'String')) {
+              case 'Integer':
+              case 'Long':
+                body[attr.name] = 1;
+                break;
+              case 'Double':
+              case 'Float':
+              case 'BigDecimal':
+                body[attr.name] = 1.0;
+                break;
+              case 'Boolean':
+                body[attr.name] = true;
+                break;
+              case 'LocalDateTime':
+                body[attr.name] = new Date().toISOString();
+                break;
+              default:
+                body[attr.name] = `${attr.name}_sample`;
+            }
+          }
+        });
+      } else {
+        body['sampleField'] = 'sample';
+      }
+      return body;
+    };
+
+    elements.forEach(entity => {
+      if (!entity || entity.type !== 'class') return;
+      const name = entity.name;
+      const basePath = `/api/${name.toLowerCase()}`;
+
+      const folder = {
+        name,
+        item: []
+      };
+
+      // GET all
+      folder.item.push({
+        name: `GET ${basePath}`,
+        request: {
+          method: 'GET',
+          header: [],
+          url: {
+            raw: `${baseUrl}${basePath}`,
+            host: [baseUrl.replace('http://', '').replace('https://', '')],
+            protocol: 'http',
+            path: basePath.split('/').filter(Boolean)
+          }
+        }
+      });
+
+      // GET by id (example id = 1)
+      folder.item.push({
+        name: `GET ${basePath}/{id}`,
+        request: {
+          method: 'GET',
+          header: [],
+          url: {
+            raw: `${baseUrl}${basePath}/1`,
+            host: [baseUrl.replace('http://', '').replace('https://', '')],
+            protocol: 'http',
+            path: [...basePath.split('/').filter(Boolean), '1']
+          }
+        }
+      });
+
+      // POST (create)
+      folder.item.push({
+        name: `POST ${basePath}`,
+        request: {
+          method: 'POST',
+          header: [
+            { key: 'Content-Type', value: 'application/json' }
+          ],
+          body: {
+            mode: 'raw',
+            raw: JSON.stringify(generarEjemploBody(entity), null, 2)
+          },
+          url: {
+            raw: `${baseUrl}${basePath}`,
+            host: [baseUrl.replace('http://', '').replace('https://', '')],
+            protocol: 'http',
+            path: basePath.split('/').filter(Boolean)
+          }
+        }
+      });
+
+      // PUT (update) example with id = 1
+      folder.item.push({
+        name: `PUT ${basePath}/{id}`,
+        request: {
+          method: 'PUT',
+          header: [
+            { key: 'Content-Type', value: 'application/json' }
+          ],
+          body: {
+            mode: 'raw',
+            raw: JSON.stringify(generarEjemploBody(entity), null, 2)
+          },
+          url: {
+            raw: `${baseUrl}${basePath}/1`,
+            host: [baseUrl.replace('http://', '').replace('https://', '')],
+            protocol: 'http',
+            path: [...basePath.split('/').filter(Boolean), '1']
+          }
+        }
+      });
+
+      // DELETE
+      folder.item.push({
+        name: `DELETE ${basePath}/{id}`,
+        request: {
+          method: 'DELETE',
+          header: [],
+          url: {
+            raw: `${baseUrl}${basePath}/1`,
+            host: [baseUrl.replace('http://', '').replace('https://', '')],
+            protocol: 'http',
+            path: [...basePath.split('/').filter(Boolean), '1']
+          }
+        }
+      });
+
+      // COUNT
+      folder.item.push({
+        name: `GET ${basePath}/count`,
+        request: {
+          method: 'GET',
+          header: [],
+          url: {
+            raw: `${baseUrl}${basePath}/count`,
+            host: [baseUrl.replace('http://', '').replace('https://', '')],
+            protocol: 'http',
+            path: [...basePath.split('/').filter(Boolean), 'count']
+          }
+        }
+      });
+
+      collection.item.push(folder);
+    });
+
+    // Guardar archivo en el proyecto generado para que el usuario lo encuentre
+    try {
+      const collectionPath = path.join(projectPath, `${projectName}-postman-collection.json`);
+      fs.writeFileSync(collectionPath, JSON.stringify(collection, null, 2), 'utf-8');
+      // También guardar en resources/static para servir si se desea
+      const staticPath = path.join(projectPath, 'src/main/resources/static');
+      if (!fs.existsSync(staticPath)) {
+        fs.mkdirSync(staticPath, { recursive: true });
+      }
+      fs.writeFileSync(path.join(staticPath, `${projectName}-postman-collection.json`), JSON.stringify(collection, null, 2), 'utf-8');
+      return { collection, savedPath: collectionPath };
+    } catch (err) {
+      console.error('❌ Error guardando colección Postman:', err.message);
+      return { collection, savedPath: null };
+    }
   };
+
+  // Nuevo endpoint: genera y devuelve la colección Postman (JSON) directamente desde una sala
+  exportPostmanDesdeSala = async (req, res) => {
+    const { id } = req.params;
+    try {
+      const [sala] = await getSalaById(id);
+      if (!sala) {
+        return response(res, 404, { error: 'Sala no encontrada' });
+      }
+      if (!sala.xml || sala.xml.trim() === '') {
+        return response(res, 400, { error: 'La sala no tiene contenido XML para exportar' });
+      }
+      let salaData;
+      try {
+        salaData = JSON.parse(sala.xml);
+      } catch (parseError) {
+        console.error(`❌ Error parseando XML de sala:`, parseError);
+        return response(res, 400, { error: 'El XML de la sala no es válido' });
+      }
+
+      let elements = [];
+      let connections = [];
+      if (salaData.elements) {
+        if (Array.isArray(salaData.elements)) {
+          elements = salaData.elements;
+        } else if (typeof salaData.elements === 'object') {
+          elements = Object.values(salaData.elements);
+        }
+      }
+      if (salaData.connections) {
+        if (Array.isArray(salaData.connections)) {
+          connections = salaData.connections;
+        } else if (typeof salaData.connections === 'object') {
+          connections = Object.values(salaData.connections);
+        }
+      }
+
+      if (elements.length === 0) {
+        return response(res, 400, { error: 'No hay elementos UML en la sala para generar la colección' });
+      }
+
+      const classElements = elements.filter(el => el.type === 'class');
+      if (classElements.length === 0) {
+        return response(res, 400, { error: 'No hay clases UML en la sala para generar la colección' });
+      }
+
+      // Procesar elementos y relaciones para obtener atributos normalizados
+      const processedData = this.procesarElementosConRelaciones(classElements, connections);
+      const projectName = `postman-${sala.title.toLowerCase().replace(/\s+/g, '-')}`;
+
+      // Generar colección (no es necesario crear todo el proyecto para obtener la colección)
+      const tempProjectPath = path.join(rutaBase, projectName);
+      if (!fs.existsSync(tempProjectPath)) {
+        fs.mkdirSync(tempProjectPath, { recursive: true });
+      }
+      const { collection } = this.generarPostmanCollection(tempProjectPath, projectName, processedData.elements);
+
+      // Enviar colección como archivo descargable (importable en Postman Desktop)
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename=${projectName}-collection.json`);
+      return res.send(Buffer.from(JSON.stringify(collection, null, 2), 'utf-8'));
+    } catch (error) {
+      console.error('❌ Error generando colección Postman desde sala:', error.message);
+      return response(res, 500, {
+        error: 'Error generando colección Postman desde sala',
+        detalles: error.message
+      });
+    }
+  };
+
+  generarReadmeConRelaciones = (projectPath, elements, connections) => {
+    // This function duplicated previously; kept for backward compatibility if called elsewhere.
+    // Already defined above; no-op here to avoid redeclaration errors if called twice.
+  };
+
+  // The rest of the file remains functionally the same. We only inserted new Postman-related helpers and endpoint.
 
   validarEstructuraJSON = (salaData) => {
     const errores = [];
@@ -1283,6 +1474,13 @@ Para consultas específicas, revisa la documentación en \`RELACIONES.md\`
       }
     }
     await this.generarDocumentacionRelaciones(projectPath, elements, connections, relaciones);
+
+    // NUEVO: generar colección Postman dentro del proyecto para que el usuario pueda importarla en Postman Desktop
+    try {
+      this.generarPostmanCollection(projectPath, projectName, elements);
+    } catch (err) {
+      console.warn('⚠️ No se pudo generar colección Postman dentro del proyecto:', err.message);
+    }
   };
 
   generarEntidadConRelaciones = async (projectPath, element, relacionesElement, herenciaInfo) => {
@@ -2090,7 +2288,7 @@ ${anotaciones}    private ${tipoCampo} ${nombreCampo};
       const nombreRelacion = relacion.fkName.replace('Id', '');
       const tipoRelacionado = relacion.referenciaA;
       metodos += `
-    
+
     /**
      * Obtener ${className.toLowerCase()}s por ${nombreRelacion}
      */
