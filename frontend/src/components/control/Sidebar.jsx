@@ -191,9 +191,9 @@ const LeftSidebar = ({
   // EDITOR DE ARISTAS (RELACIONES) - Versión mejorada
   // ==========================
   const renderEdgeEditor = () => {
-    console.log('🎨 Renderizando editor de relaciones');
-    console.log('🎨 selectedEdge:', selectedEdge);
-    console.log('🎨 editingEdge:', editingEdge);
+  // console.log('🎨 Renderizando editor de relaciones');
+  // console.log('🎨 selectedEdge:', selectedEdge);
+  // console.log('🎨 editingEdge:', editingEdge);
 
     if (!selectedEdge) {
       return (

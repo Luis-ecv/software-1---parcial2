@@ -196,7 +196,7 @@ class AIController {
                 });
             }
 
-            console.log(`🔧 ModifyDiagram: "${prompt}" (mode: ${mode}, dryRun: ${dryRun})`);
+            // console.log(`🔧 ModifyDiagram: "${prompt}" (mode: ${mode}, dryRun: ${dryRun})`);
 
             // Preparar el estado actual del diagrama para el contexto de la IA
             const currentState = {
@@ -227,12 +227,12 @@ class AIController {
                 aiPrompt += `Aplica los cambios solicitados. Si necesitas aclaración, usa 'clarifyingQuestions'.`;
             }
 
-            console.log('🤖 Enviando prompt a IA:', aiPrompt.substring(0, 500) + '...');
+            // console.log('🤖 Enviando prompt a IA:', aiPrompt.substring(0, 500) + '...');
 
             // Llamar a la IA para procesar la modificación
             const aiResponse = await AIController.generateUMLFromText(aiPrompt);
             
-            console.log('🎯 Respuesta de IA:', JSON.stringify(aiResponse, null, 2).substring(0, 1000) + '...');
+            // console.log('🎯 Respuesta de IA:', JSON.stringify(aiResponse, null, 2).substring(0, 1000) + '...');
 
             // Normalizar la respuesta de la IA
             if (!aiResponse || typeof aiResponse !== 'object') {
@@ -253,7 +253,7 @@ class AIController {
             const elements = Array.isArray(aiResponse.elements) ? aiResponse.elements : [];
             const relationships = Array.isArray(aiResponse.relationships) ? aiResponse.relationships : [];
 
-            console.log(`📊 Resultado IA - Elements: ${elements.length}, Relationships: ${relationships.length}`);
+            // console.log(`📊 Resultado IA - Elements: ${elements.length}, Relationships: ${relationships.length}`);
 
             // Procesar las modificaciones comparando con el estado actual
             const resultNodes = [];
@@ -276,7 +276,7 @@ class AIController {
                 );
                 
                 if (!existsInAI) {
-                    console.log(`🗑️ Nodo eliminado detectado: ${currentElement.name} (${currentElement.id})`);
+                    // console.log(`🗑️ Nodo eliminado detectado: ${currentElement.name} (${currentElement.id})`);
                     eliminatedNodes.push(currentElement);
                 } else {
                     // Mantener el nodo (puede estar actualizado)
@@ -309,7 +309,7 @@ class AIController {
                 );
 
                 if (!existsInCurrent) {
-                    console.log(`➕ Nuevo nodo detectado: ${aiElement.name}`);
+                    // console.log(`➕ Nuevo nodo detectado: ${aiElement.name}`);
                     resultNodes.push({
                         id: aiElement.id || `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                         type: 'classNode',
@@ -364,7 +364,7 @@ class AIController {
                 }
             }
 
-            console.log(`✅ Resultado final - Nodos: ${resultNodes.length}, Edges: ${resultEdges.length}, Eliminados: ${eliminatedNodes.length}`);
+            // console.log(`✅ Resultado final - Nodos: ${resultNodes.length}, Edges: ${resultEdges.length}, Eliminados: ${eliminatedNodes.length}`);
 
             const response = {
                 success: true,
@@ -399,7 +399,7 @@ class AIController {
             let userInput = '';
             let responseMessage = '';
 
-            console.log('AI Request:', { type, salaId, hasContent: !!content });
+            // console.log('AI Request:', { type, salaId, hasContent: !!content });
 
             // Check if Gemini is configured
             if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your_gemini_api_key_here') {
@@ -486,7 +486,7 @@ class AIController {
             // Log diagram summary for debugging (no sensitive data)
             try {
                 const elementsCount = Array.isArray(diagram.elements) ? diagram.elements.length : (diagram.elements ? Object.keys(diagram.elements).length : 0);
-                console.log(`AI generated diagram summary: elements=${elementsCount}, relationships=${Array.isArray(diagram.relationships)?diagram.relationships.length:0}`);
+                // console.log(`AI generated diagram summary: elements=${elementsCount}, relationships=${Array.isArray(diagram.relationships)?diagram.relationships.length:0}`);
             } catch (logErr) {
                 console.warn('No se pudo obtener resumen del diagrama generado:', logErr.message);
             }
@@ -713,7 +713,7 @@ class AIController {
             diagram.relationships = Object.values(diagram.relationships || {});
         }
 
-        console.log(`✅ Diagram structure - Elements: ${diagram.elements.length}, Relationships: ${diagram.relationships.length}`);
+    // console.log(`✅ Diagram structure - Elements: ${diagram.elements.length}, Relationships: ${diagram.relationships.length}`);
 
         // Validate and normalize each element
         diagram.elements.forEach((element, index) => {
@@ -778,7 +778,7 @@ class AIController {
             }
         });
 
-        console.log('✅ Diagram validation completed successfully');
+    // console.log('✅ Diagram validation completed successfully');
         return true;
     }
 

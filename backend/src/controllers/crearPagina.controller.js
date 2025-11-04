@@ -94,7 +94,7 @@ class CrearPaginaController {
         return response(res, 400, { error: 'No hay clases UML en la sala para generar entidades Spring Boot' });
       }
       classElements.forEach((el, i) => {
-        console.log(`    ${i + 1}. ${el.name} (${el.type}) - Atributos: ${el.attributes ? el.attributes.length : 0}`);
+        // console.log(`    ${i + 1}. ${el.name} (${el.type}) - Atributos: ${el.attributes ? el.attributes.length : 0}`);
       });
       const processedData = this.procesarElementosConRelaciones(classElements, []);
       const projectName = `spring-boot-${sala.title.toLowerCase().replace(/\s+/g, '-')}`;
@@ -118,12 +118,12 @@ class CrearPaginaController {
     }
     elements.forEach((el, i) => {
       if (el.type === 'class') {
-        console.log(`    ${i + 1}. ${el.name} - Atributos: ${el.attributes ? el.attributes.length : 0}`);
+        // console.log(`    ${i + 1}. ${el.name} - Atributos: ${el.attributes ? el.attributes.length : 0}`);
       }
     });
     if (connections && connections.length > 0) {
       connections.forEach((conn, i) => {
-        console.log(`    ${i + 1}. ${conn.type}: ${conn.source}(${conn.sourceMultiplicity}) -> ${conn.target}(${conn.targetMultiplicity})`);
+        // console.log(`    ${i + 1}. ${conn.type}: ${conn.source}(${conn.sourceMultiplicity}) -> ${conn.target}(${conn.targetMultiplicity})`);
       });
     }
     const classElements = elements.filter(el => el.type === 'class');
@@ -187,10 +187,10 @@ class CrearPaginaController {
         return response(res, 400, { error: 'No hay clases UML en la sala para generar entidades Spring Boot' });
       }
       classElements.forEach((el, i) => {
-        console.log(`    ${i + 1}. ${el.name} (${el.type}) - Atributos: ${el.attributes ? el.attributes.length : 0}`);
+        // console.log(`    ${i + 1}. ${el.name} (${el.type}) - Atributos: ${el.attributes ? el.attributes.length : 0}`);
       });
       connections.forEach((conn, i) => {
-        console.log(`    ${i + 1}. ${conn.type}: ${conn.source}(${conn.sourceMultiplicity}) -> ${conn.target}(${conn.targetMultiplicity})`);
+        // console.log(`    ${i + 1}. ${conn.type}: ${conn.source}(${conn.sourceMultiplicity}) -> ${conn.target}(${conn.targetMultiplicity})`);
       });
       const processedData = this.procesarElementosConRelaciones(classElements, connections);
       const projectName = `spring-boot-${sala.title.toLowerCase().replace(/\s+/g, '-')}`;
@@ -1191,13 +1191,13 @@ Para consultas específicas, revisa la documentación en \`RELACIONES.md\`
       const esHerencia = herencia[element.id];
       if (esHerencia) {
         if (esHerencia.esClasePadre) {
-          console.log(`   - Es clase PADRE de: [${esHerencia.hijos.join(', ')}]`);
+          // console.log(`   - Es clase PADRE de: [${esHerencia.hijos.join(', ')}]`);
         } else {
-          console.log(`   - Es clase HIJA de: ${esHerencia.clasePadre}`);
+          // console.log(`   - Es clase HIJA de: ${esHerencia.clasePadre}`);
         }
       }
       elementRelaciones.forEach(rel => {
-        console.log(`   - FK: ${rel.fkName} (${rel.fkType}) -> ${rel.referenciaA} [${rel.tipoRelacion}]`);
+        // console.log(`   - FK: ${rel.fkName} (${rel.fkType}) -> ${rel.referenciaA} [${rel.tipoRelacion}]`);
       });
     });
   };
@@ -1222,7 +1222,7 @@ Para consultas específicas, revisa la documentación en \`RELACIONES.md\`
         const pkStatus = attribute.isPrimaryKey === true ? 'PK:true' : '';
         const fkStatus = attribute.isForeignKey === true ? 'FK:true' : '';
         const statusStr = [pkStatus, fkStatus].filter(s => s).join(', ');
-        console.log(`🔍 ParseAttribute: ${attribute.name} - ${statusStr}`);
+  // console.log(`🔍 ParseAttribute: ${attribute.name} - ${statusStr}`);
       }
       const visibility = attribute.visibility === 'private' ? '-' :
         attribute.visibility === 'protected' ? '#' : '+';
@@ -1286,7 +1286,7 @@ Para consultas específicas, revisa la documentación en \`RELACIONES.md\`
       }
     });
     const herenciaInfo = this.manejarHerencia(processedElements, connections);
-    console.log('✅ Procesamiento completo con relaciones terminado');
+  // console.log('✅ Procesamiento completo con relaciones terminado');
     return {
       elements: processedElements,
       herencia: herenciaInfo,
@@ -2139,7 +2139,7 @@ public class ${className}Controller {
           relacionInfo: relacion
         };
         element.attributes.push(fkAttribute);
-        console.log(`✅ FK agregada: ${element.name}.${relacion.fkName} -> ${relacion.referenciaA}`);
+        // console.log(`✅ FK agregada: ${element.name}.${relacion.fkName} -> ${relacion.referenciaA}`);
       }
     });
   };
@@ -2169,7 +2169,7 @@ public class ${className}Controller {
             clasePadre: padre.name,
             padreId: padreId
           };
-          console.log(`🏗️ Herencia identificada: ${hijo.name} extends ${padre.name}`);
+          // console.log(`🏗️ Herencia identificada: ${hijo.name} extends ${padre.name}`);
         }
       }
     });

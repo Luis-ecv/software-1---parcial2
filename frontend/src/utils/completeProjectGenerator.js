@@ -23,14 +23,7 @@ export const generateCompleteProject = async (nodes, edges, projectName = 'UMLGe
     // Generar código base con nodos filtrados y validaciones ya incluidas
     const baseResult = generateCode(validNodes, edges, true);
     
-    // Debug: Verificar que tenemos todas las capas
-    console.log('🔍 GenerateCompleteProject - baseResult:', {
-      models: baseResult.models?.length || 0,
-      repositories: baseResult.repositories?.length || 0,  
-      services: baseResult.services?.length || 0,
-      controllers: baseResult.controllers?.length || 0,
-      type: baseResult.type
-    });
+    // Debug info removed: summary of baseResult (was logging models/repositories/services/controllers)
     
     // Importar JSZip dinámicamente
     const JSZip = (await import('jszip')).default;
@@ -251,10 +244,10 @@ Thumbs.db
     zip.file('.gitignore', gitignore);
 
     // Añadir código generado (con imports corregidos a Jakarta)
-    console.log('🔍 Añadiendo modelos al ZIP...');
+  // console.log('🔍 Añadiendo modelos al ZIP...');
     if (baseResult.models && baseResult.models.length > 0) {
       baseResult.models.forEach(model => {
-        console.log(`  📄 Añadiendo: ${model.className}.java`);
+  // console.log(`  📄 Añadiendo: ${model.className}.java`);
         const javaCode = model.code.replace(/javax\.persistence/g, 'jakarta.persistence');
         zip.file(`src/main/java/com/generated/entities/${model.className}.java`, javaCode);
       });
@@ -262,30 +255,30 @@ Thumbs.db
       console.warn('⚠️ No hay modelos para añadir');
     }
 
-    console.log('🔍 Añadiendo repositorios al ZIP...');
+  // console.log('🔍 Añadiendo repositorios al ZIP...');
     if (baseResult.repositories && baseResult.repositories.length > 0) {
       baseResult.repositories.forEach(repo => {
-        console.log(`  📄 Añadiendo: ${repo.className}Repository.java`);
+  // console.log(`  📄 Añadiendo: ${repo.className}Repository.java`);
         zip.file(`src/main/java/com/generated/repositories/${repo.className}Repository.java`, repo.code);
       });
     } else {
       console.warn('⚠️ No hay repositorios para añadir');
     }
 
-    console.log('🔍 Añadiendo servicios al ZIP...');
+  // console.log('🔍 Añadiendo servicios al ZIP...');
     if (baseResult.services && baseResult.services.length > 0) {
       baseResult.services.forEach(service => {
-        console.log(`  📄 Añadiendo: ${service.className}Service.java`);
+  // console.log(`  📄 Añadiendo: ${service.className}Service.java`);
         zip.file(`src/main/java/com/generated/services/${service.className}Service.java`, service.code);
       });
     } else {
       console.warn('⚠️ No hay servicios para añadir');
     }
 
-    console.log('🔍 Añadiendo controladores al ZIP...');
+  // console.log('🔍 Añadiendo controladores al ZIP...');
     if (baseResult.controllers && baseResult.controllers.length > 0) {
       baseResult.controllers.forEach(controller => {
-        console.log(`  📄 Añadiendo: ${controller.className}Controller.java`);
+  // console.log(`  📄 Añadiendo: ${controller.className}Controller.java`);
         zip.file(`src/main/java/com/generated/controllers/${controller.className}Controller.java`, controller.code);
       });
     } else {

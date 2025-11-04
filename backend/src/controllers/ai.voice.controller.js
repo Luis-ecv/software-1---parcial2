@@ -51,7 +51,7 @@ class AIVoiceController {
                         transcription = "Necesito diseñar un sistema completo de comercio electrónico. Debe incluir una clase Usuario con información personal, una clase Producto con nombre, precio, descripción y stock. También una clase Pedido que conecte usuarios con productos, incluyendo cantidad y fecha. Además, una clase Categoria para organizar los productos y una clase Pago para manejar las transacciones";
                     }
                     
-                    console.log(`🎙️ Audio transcrito (${audioSize} bytes): ${transcription.substring(0, 50)}...`);
+                    // console.log(`🎙️ Audio transcrito (${audioSize} bytes): ${transcription.substring(0, 50)}...`);
                     return transcription;
                     
                 } catch (geminiError) {
@@ -62,7 +62,7 @@ class AIVoiceController {
             // Fallback: simulación por defecto
             const defaultTranscription = "Quiero crear un diagrama para una tienda pequeña. Necesito una clase Producto con atributos nombre, precio y stock. También una clase Cliente con nombre, email y teléfono. Y una clase Venta que conecte productos con clientes.";
             
-            console.log('🎙️ Usando transcripción simulada por defecto');
+            // console.log('🎙️ Usando transcripción simulada por defecto');
             return defaultTranscription;
 
         } catch (error) {
@@ -113,7 +113,7 @@ Genera una descripción expandida y detallada:`;
                     const result = await model.generateContent(EXPANSION_PROMPT);
                     const expandedDescription = result.response.text();
                     
-                    console.log(`🧠 Descripción expandida: ${expandedDescription.substring(0, 100)}...`);
+                    // console.log(`🧠 Descripción expandida: ${expandedDescription.substring(0, 100)}...`);
                     return expandedDescription;
                 } catch (error) {
                     console.warn('Error expandiendo con Gemini:', error.message);
@@ -258,7 +258,7 @@ GÉNERA ÚNICAMENTE EL JSON - SIN EXPLICACIONES.`;
                 }
 
                 const diagram = JSON.parse(responseText);
-                console.log(`🎤 Diagrama de voz generado: ${diagram.elements?.length || 0} clases, ${diagram.relationships?.length || 0} relaciones`);
+                // console.log(`🎤 Diagrama de voz generado: ${diagram.elements?.length || 0} clases, ${diagram.relationships?.length || 0} relaciones`);
                 
                 return diagram;
             }

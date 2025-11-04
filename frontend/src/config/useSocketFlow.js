@@ -408,7 +408,7 @@ export const useSocketFlow = (boardId, currentUser = null, options = {}) => {
       if (Array.isArray(updated) && Array.isArray(key)) {
         const nodesArr = updated;
         const edgesArr = key;
-        console.debug('useSocketFlow: updateBoardData legacy nodes/edges signature', { nodes: nodesArr.length, edges: edgesArr.length });
+    // console.debug('useSocketFlow: updateBoardData legacy nodes/edges signature', { nodes: nodesArr.length, edges: edgesArr.length });
         pushDebugEvent('updateBoardData.legacy', { nodes: nodesArr.length, edges: edgesArr.length });
         emitSafe('actualizarDiagrama', { salaId: boardRef.current, usuario: usuarioPayload, action: 'fullState', data: { state: { nodes: nodesArr, edges: edgesArr } } });
         return;
@@ -429,7 +429,7 @@ export const useSocketFlow = (boardId, currentUser = null, options = {}) => {
       // If caller passed a full state object
       if (updated && typeof updated === 'object' && (updated.nodes || updated.edges)) {
         const state = { nodes: updated.nodes || nodes, edges: updated.edges || edges };
-        console.debug('useSocketFlow: updateBoardData full state object', { nodes: state.nodes.length, edges: state.edges.length });
+  // console.debug('useSocketFlow: updateBoardData full state object', { nodes: state.nodes.length, edges: state.edges.length });
         pushDebugEvent('updateBoardData.fullObject', { nodes: state.nodes.length, edges: state.edges.length });
         emitSafe('actualizarDiagrama', { salaId: boardRef.current, usuario: usuarioPayload, action: 'fullState', data: { state } });
         return;

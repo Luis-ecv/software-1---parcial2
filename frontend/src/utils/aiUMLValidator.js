@@ -66,14 +66,14 @@ export const extractDiagramSummary = (nodes, edges) => {
   }));
 
   // Log para debugging
-  console.log('📊 Extracción UML:', {
-    nodosOriginales: nodes.length,
-    nodosUML: nodos.length,
-    edgesOriginales: edges.length,
-    edgesUML: aristas.length,
-    nodosExcluidos: nodes.length - nodos.length,
-    edgesExcluidos: edges.length - aristas.length
-  });
+    // console.log('📊 Extracción UML:', {
+    //   nodosOriginales: nodes.length,
+    //   nodosUML: nodos.length,
+    //   edgesOriginales: edges.length,
+    //   edgesUML: aristas.length,
+    //   nodosExcluidos: nodes.length - nodos.length,
+    //   edgesExcluidos: edges.length - aristas.length
+    // });
 
   return { nodos, aristas };
 };

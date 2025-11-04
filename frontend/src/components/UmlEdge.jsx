@@ -1,5 +1,5 @@
 import React, { memo, useState } from 'react';
-import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, getBezierPath, Position } from '@xyflow/react';
+import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, getBezierPath, Position, useReactFlow } from '@xyflow/react';
 
 // Función para calcular la posición de las etiquetas de cardinalidad según el handle
 const getCardinalityPosition = (x, y, position, type) => {
@@ -88,6 +88,32 @@ const UmlEdge = ({
   data,
   style = {}
 }) => {
+  // Acceso a React Flow para obtener nodos y edges actuales
+  const { getNodes, getEdges } = useReactFlow();
+  
+  // Estado para forzar re-render de líneas punteadas
+  const [forceRender, setForceRender] = useState(0);
+  
+  // Sistema de callback para forzar re-render cuando el edge padre cambia
+  React.useEffect(() => {
+    if (data?.isAssociationConnection && data?.parentRelationId) {
+      const forceUpdate = (parentEdgeId) => {
+        if (parentEdgeId === data.parentRelationId) {
+          setForceRender(prev => prev + 1);
+
+        }
+      };
+      
+      window.__forceAssocLineUpdate = forceUpdate;
+      
+      return () => {
+        if (window.__forceAssocLineUpdate === forceUpdate) {
+          window.__forceAssocLineUpdate = null;
+        }
+      };
+    }
+  }, [data?.isAssociationConnection, data?.parentRelationId, id]);
+  
   // Detectar si es una conexión recursiva (mismo nodo).
   // Preferir comparar los ids de nodo (source === target). Como fallback,
   // comparar coordenadas (por compatibilidad con versiones antiguas).
@@ -99,9 +125,36 @@ const UmlEdge = ({
   const customControlPoints = data?.controlPoints || [];
   const hasCustomPath = customControlPoints.length > 0;
   
+  // Ensure data is defined and get edge type flags early
+  data = data || {};
+  const isAssociationConnection = data?.isAssociationConnection || false;
+  const isNoteConnection = data?.isNoteConnection || false;
+  
   let edgePath, labelX, labelY;
   
-  if (hasCustomPath && !isRecursive) {
+  // 🎯 MODIFICACIÓN PARA ASSOCIATION CLASS: Forzar path a través del punto AC
+  if (data?.hasAssociationClass && !isAssociationConnection && !isNoteConnection) {
+    // Para edges con clase de asociación, usar Bézier que pase por el punto AC
+    const midX = (sourceX + targetX) / 2;
+    const midY = (sourceY + targetY) / 2;
+    
+    // Crear Bézier path que pase por el punto medio (donde está el AC)
+    [edgePath, labelX, labelY] = getBezierPath({
+      sourceX,
+      sourceY,
+      sourcePosition,
+      targetX,
+      targetY,
+      targetPosition,
+      curvature: 0.1 // Curvatura menor para que pase más cerca del AC
+    });
+    
+    // Forzar que el label esté en el punto medio calculado
+    labelX = midX;
+    labelY = midY - 10; // Slightly above for better visibility
+    
+
+  } else if (hasCustomPath && !isRecursive) {
     // Usar Bézier path con puntos de control personalizados
     const controlX = customControlPoints[0]?.x || (sourceX + targetX) / 2;
     const controlY = customControlPoints[0]?.y || (sourceY + targetY) / 2;
@@ -130,9 +183,50 @@ const UmlEdge = ({
   }
 
   if (!edgePath) return null;
-  // Ensure data is defined
-  data = data || {};
+  
+  // 🔍 DEBUG TEMPORAL: Log de coordenadas del edge para debug de asociación
+  if (data?.hasAssociationClass || data?.isAssociationConnection) {
+  
+    
+    // 🎯 COMUNICAR COORDENADAS REALES AL BOARDPAGE Y A LÍNEAS PUNTEADAS
+    if (data?.hasAssociationClass && window.__onAssocEdgeRender) {
+      window.__onAssocEdgeRender({
+        edgeId: id,
+        realLabelX: labelX,
+        realLabelY: labelY,
+        sourceX,
+        sourceY,
+        targetX,
+        targetY
+      });
+    }
+    
+    // 🔄 SISTEMA DE COORDENADAS COMPARTIDAS para líneas punteadas
+    if (data?.hasAssociationClass) {
+      if (!window.__acCoordinates) window.__acCoordinates = {};
+      
+      // Detectar si las coordenadas han cambiado
+      const prevCoords = window.__acCoordinates[id];
+      const coordsChanged = !prevCoords || 
+        Math.abs(prevCoords.acX - labelX) > 0.1 || 
+        Math.abs(prevCoords.acY - labelY) > 0.1;
+      
+      window.__acCoordinates[id] = {
+        acX: labelX,
+        acY: labelY,
+        timestamp: Date.now(),
+        version: (prevCoords?.version || 0) + (coordsChanged ? 1 : 0)
+      };
+      
+      // Forzar invalidación de líneas punteadas cuando las coordenadas cambian
+      if (coordsChanged && window.__forceAssocLineUpdate) {
+        window.__forceAssocLineUpdate(id);
+      }
+      
 
+    }
+  }
+  
   // Resolve relationship type case-insensitively and default to Association
   const requestedRel = data.type || data.relation || 'Association';
   let edgeType = UML_RELATIONSHIP_TYPES['Association'];
@@ -143,15 +237,59 @@ const UmlEdge = ({
     edgeType = UML_RELATIONSHIP_TYPES['Association'];
   }
   const isSelected = data?.selected || false;
-  const isAssociationConnection = data?.isAssociationConnection || false;
-  const isNoteConnection = data?.isNoteConnection || false;
   
   // Estilos especiales para conexiones de clase de asociación
   if (isAssociationConnection) {
+  
+    
+    // Si tiene coordenadas AC target específicas, renderizar hacia esas coordenadas
+    let finalPath = edgePath;
+    let finalLabelX = labelX;
+    let finalLabelY = labelY;
+    
+    // 🎯 COORDENADAS DINÁMICAS PRECISAS desde el edge original
+    if (data?.parentRelationId) {
+      // Obtener coordenadas exactas del edge original desde el sistema compartido
+      // El forceRender garantiza que siempre leemos las coordenadas más actuales
+      const originalCoords = window.__acCoordinates?.[data.parentRelationId];
+      
+      if (originalCoords && originalCoords.acX !== undefined && originalCoords.acY !== undefined) {
+        // Usar las coordenadas EXACTAS del edge original (máxima precisión)
+        [finalPath, finalLabelX, finalLabelY] = getSmoothStepPath({
+          sourceX,
+          sourceY,
+          sourcePosition,
+          targetX: originalCoords.acX,
+          targetY: originalCoords.acY,
+          targetPosition: Position.Top,
+          borderRadius: 5,
+          offset: 10
+        });
+        
+
+      } else {
+        // Fallback: coordenadas estáticas
+        if (data?.acTargetX && data?.acTargetY) {
+          [finalPath, finalLabelX, finalLabelY] = getSmoothStepPath({
+            sourceX,
+            sourceY,
+            sourcePosition,
+            targetX: data.acTargetX,
+            targetY: data.acTargetY,
+            targetPosition: Position.Top,
+            borderRadius: 5,
+            offset: 10
+          });
+          
+
+        }
+      }
+    }
+    
     const associationStyle = {
       ...style,
       stroke: '#dc2626',
-      strokeWidth: 3,
+      strokeWidth: 2,
       strokeDasharray: '8,4',
       pointerEvents: 'none',
       opacity: 1,
@@ -162,7 +300,7 @@ const UmlEdge = ({
       <>
         <BaseEdge
           id={id}
-          path={edgePath}
+          path={finalPath}
           style={associationStyle}
           markerEnd="none"
           markerStart="none"
@@ -177,12 +315,12 @@ const UmlEdge = ({
               borderRadius: '4px',
               fontSize: '10px',
               fontWeight: 'bold',
-              transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+              transform: `translate(-50%, -50%) translate(${finalLabelX}px,${finalLabelY}px)`,
               pointerEvents: 'none',
               zIndex: 1001
             }}
           >
-            ASSOC
+            AC-LINK
           </div>
         </EdgeLabelRenderer>
       </>

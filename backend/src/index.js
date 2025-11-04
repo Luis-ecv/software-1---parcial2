@@ -59,7 +59,7 @@ const pendingSaveTimers = new Map();
 const SAVE_DEBOUNCE_MS = parseInt(process.env.SAVE_DEBOUNCE_MS || '3000', 10);
 
 io.on('connection', (socket) => {
-    console.log('🟢 Nuevo cliente conectado:', socket.id);
+    // console.log('🟢 Nuevo cliente conectado:', socket.id);
     // Accept optional ack callback: socket.emit('unirseSala', payload, (ack) => { ... })
     socket.on('unirseSala', async ({ salaId, usuario } = {}, callback) => {
         try {
@@ -85,13 +85,13 @@ io.on('connection', (socket) => {
             const sala = salasActivas.get(salaIdNormalizado);
             sala.usuarios.set(socket.id, { ...resolvedUsuario, socketId: socket.id });
             const clientesSocketIO = io.sockets.adapter.rooms.get(`sala_${salaIdNormalizado}`);
-                    console.log(`Room state for sala ${salaIdNormalizado}:`);
-                    console.log(`   users in memory: ${sala.usuarios.size}`);
-                    console.log(`   socket.io clients in room: ${clientesSocketIO ? clientesSocketIO.size : 0}`);
+                    // console.log(`Room state for sala ${salaIdNormalizado}:`);
+                    // console.log(`   users in memory: ${sala.usuarios.size}`);
+                    // console.log(`   socket.io clients in room: ${clientesSocketIO ? clientesSocketIO.size : 0}`);
 
-                    sala.usuarios.forEach((user, socketId) => {
-                        console.log(`      - ${user.name} (${user.isInvited ? 'invited' : 'owner'}) - socket: ${socketId}`);
-                    });
+                    // sala.usuarios.forEach((user, socketId) => {
+                    //     console.log(`      - ${user.name} (${user.isInvited ? 'invited' : 'owner'}) - socket: ${socketId}`);
+                    // });
             
             socket.to(`sala_${salaIdNormalizado}`).emit('usuarioUnido', { 
                 usuario: resolvedUsuario,
@@ -99,16 +99,16 @@ io.on('connection', (socket) => {
             });
 
             // If client provided an ack callback, confirm join
-            try {
+                try {
                 if (typeof callback === 'function') {
                     callback({ ok: true, salaId: salaIdNormalizado, usuarios: Array.from(sala.usuarios.values()) });
                 }
             } catch (err) {
-                console.warn('unirseSala: ack callback failed', err);
+                // console.warn('unirseSala: ack callback failed', err);
             }
             
             try {
-                console.log(`Socket: loading state for sala ID: ${salaIdNormalizado}`);
+                // console.log(`Socket: loading state for sala ID: ${salaIdNormalizado}`);
                 const salaData = await getSalaById(salaIdNormalizado);
                 if (salaData && salaData.length > 0 && salaData[0].xml) {
                     const estadoInicial = JSON.parse(salaData[0].xml);
@@ -131,9 +131,9 @@ io.on('connection', (socket) => {
             }
             const usuariosConectados = Array.from(sala.usuarios.values());
             socket.emit('usuariosConectados', { usuarios: usuariosConectados });
-            usuariosConectados.forEach(u => {
-                console.log(`      - ${u.name} (${u.isInvited ? 'INVITADO/USERSALA' : 'PROPIETARIO'})`);
-            });
+            // usuariosConectados.forEach(u => {
+            //     console.log(`      - ${u.name} (${u.isInvited ? 'INVITADO/USERSALA' : 'PROPIETARIO'})`);
+            // });
         } catch (error) {
             console.error('Error al unirse a la sala:', error);
             socket.emit('errorSincronizacion', { message: 'Error al unirse a la sala' });
@@ -234,10 +234,10 @@ io.on('connection', (socket) => {
                         const timeout = setTimeout(async () => {
                             try {
                                 const xmlString = JSON.stringify(sala.ultimoEstado);
-                                console.log(`Debounced save: persisting sala ${salaIdNormalizado} (length ${xmlString.length})`);
+                                // console.log(`Debounced save: persisting sala ${salaIdNormalizado} (length ${xmlString.length})`);
                                 await updateSala(salaIdNormalizado, undefined, xmlString, undefined, io);
                                 pendingSaveTimers.delete(salaIdNormalizado);
-                                console.log(`Debounced save: sala ${salaIdNormalizado} persisted`);
+                                // console.log(`Debounced save: sala ${salaIdNormalizado} persisted`);
                             } catch (saveErr) {
                                 console.error(`Debounced save failed for sala ${salaIdNormalizado}:`, saveErr);
                             }
@@ -298,7 +298,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         try {
-            console.log('Socket client disconnected:', socket.id);
+            // console.log('Socket client disconnected:', socket.id);
             if (socket.salaId && socket.usuario) {
                 const sala = salasActivas.get(socket.salaId);
                 if (sala) {
@@ -307,7 +307,7 @@ io.on('connection', (socket) => {
                         usuarioId: socket.usuario.id 
                     });
                     if (sala.usuarios.size === 0) {
-                        console.log(`Cleaning empty room ${socket.salaId}`);
+                        // console.log(`Cleaning empty room ${socket.salaId}`);
                         salasActivas.delete(socket.salaId);
                     }
                 }

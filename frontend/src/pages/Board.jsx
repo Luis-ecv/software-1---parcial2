@@ -121,7 +121,7 @@ const Board = () => {
       const res = await fetch(`${boardApiBase}`, { credentials: 'include', cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
       const status = res.status;
   const raw = await res.json().catch(() => null);
-  console.debug('getBoardList response status:', status, 'raw:', raw);
+  // console.debug('getBoardList response status:', status, 'raw:', raw);
   if (!res.ok) {
         // If server returned 401/403, force logout or redirect
         if (status === 401 || status === 403) {
@@ -152,7 +152,7 @@ const Board = () => {
           participantes
         };
       });
-      console.debug('Normalized boards:', normalized);
+  // console.debug('Normalized boards:', normalized);
       setBoardList(normalized || []);
     } catch (error) {
       console.error("Error al obtener tableros:", error);

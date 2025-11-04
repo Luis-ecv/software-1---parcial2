@@ -15,15 +15,15 @@ class SalaController {
         const { title, xml, description } = req.body;
         const { id } = req.params;
         
-        console.log(`Controller: update request for sala ID: ${id}`);
-        console.log(`Controller: received fields:`, {
-            title: title ? 'yes' : 'no',
-            xml: xml ? `yes (${xml.length} chars)` : 'no',
-            description: description ? 'yes' : 'no'
-        });
+        // console.log(`Controller: update request for sala ID: ${id}`);
+        // console.log(`Controller: received fields:`, {
+        //     title: title ? 'yes' : 'no',
+        //     xml: xml ? `yes (${xml.length} chars)` : 'no',
+        //     description: description ? 'yes' : 'no'
+        // });
         
         if (!title && !xml && !description) {
-            console.log(`❌ Controller: Petición rechazada - No hay campos para actualizar`);
+            // console.log(`❌ Controller: Petición rechazada - No hay campos para actualizar`);
             return response(res, 400, { 
                 error: true, 
                 message: 'Debe proporcionar al menos un campo: title, xml o description.' 
@@ -31,11 +31,11 @@ class SalaController {
         }
         
         try {
-            console.log(`Controller: checking ownership for sala ${id}`);
+            // console.log(`Controller: checking ownership for sala ${id}`);
             // Obtener la sala para comprobar propietario
             const salaRows = await getSalaById(id);
             if (!salaRows || salaRows.length === 0) {
-                console.log(`Controller: sala ${id} not found when checking ownership`);
+                // console.log(`Controller: sala ${id} not found when checking ownership`);
                 return response(res, 404, { error: true, message: 'Sala no encontrada' });
             }
             const salaRow = salaRows[0];
@@ -45,16 +45,16 @@ class SalaController {
                 return response(res, 401, { error: true, message: 'Unauthorized' });
             }
             if (parseInt(ownerId, 10) !== parseInt(requesterId, 10)) {
-                console.log(`Controller: requester ${requesterId} is not owner ${ownerId} - forbidden`);
+                // console.log(`Controller: requester ${requesterId} is not owner ${ownerId} - forbidden`);
                 return response(res, 403, { error: true, message: 'No tienes permisos para actualizar esta sala' });
             }
 
-            console.log(`Controller: attempting to update sala ${id} in DB`);
+            // console.log(`Controller: attempting to update sala ${id} in DB`);
             // Pasar la instancia io para broadcast automático
             const io = req.app.get('io');
             const sala = await updateSala(id, title, xml, description, io);
-            console.log(`Controller: Sala ${id} updated successfully`);
-            console.log(`Controller: broadcast triggered to connected users`);
+            // console.log(`Controller: Sala ${id} updated successfully`);
+            // console.log(`Controller: broadcast triggered to connected users`);
 
             response(res, 200, {
                 success: true,
@@ -73,15 +73,15 @@ class SalaController {
 
     getSalaById = catchedAsync(async (req, res) => {
         const { id } = req.params;
-        console.log(`Controller: fetching sala with ID: ${id}`);
+        // console.log(`Controller: fetching sala with ID: ${id}`);
         
         const sala = await getSalaById(id);
-        console.log(`Controller: db result for sala ${id}: rows=${sala?.length || 0}`);
+        // console.log(`Controller: db result for sala ${id}: rows=${sala?.length || 0}`);
         
         if (sala && sala.length > 0 && sala[0].xml) {
-            console.log(`Controller: XML preview for sala ${id}:`, sala[0].xml.substring(0, 100) + '...');
+            // console.log(`Controller: XML preview for sala ${id}:`, sala[0].xml.substring(0, 100) + '...');
         } else {
-            console.log(`Controller: sala ${id} has no XML or is empty`);
+            // console.log(`Controller: sala ${id} has no XML or is empty`);
         }
         response(res, 200, sala);
     });

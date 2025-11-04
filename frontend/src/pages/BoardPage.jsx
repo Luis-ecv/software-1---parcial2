@@ -387,7 +387,7 @@ const BoardPage = () => {
       });
 
       // Log para debugging
-      console.log('🤖 Resultado verificación IA:', resultado);
+  // console.log('🤖 Resultado verificación IA:', resultado);
 
     } catch (error) {
       console.error('Error en verificación con IA:', error);
@@ -818,7 +818,9 @@ const BoardPage = () => {
   // onConnect para crear aristas por defecto - Versión mejorada
   const onConnect = useCallback(
     (params) => {
-
+      
+      // 🔍 DEBUG TEMPORAL: Log completo de onConnect para debug de asociación
+      console.debug(`🔗 onConnect llamado con params:`, params);
       
       if (!params.source || !params.target) {
         console.warn('⚠️ Error: source o target faltante', params);
@@ -828,7 +830,15 @@ const BoardPage = () => {
       // Detectar si es una conexión de nota
       const sourceNode = nodes.find(n => n.id === params.source);
       const targetNode = nodes.find(n => n.id === params.target);
+      
+      // 🔍 DEBUG TEMPORAL: Información de nodos involucrados
+      console.debug(`   Source node:`, sourceNode?.data);
+      console.debug(`   Target node:`, targetNode?.data);
+      console.debug(`   Source isConnectionPoint: ${sourceNode?.data?.isConnectionPoint}`);
+      console.debug(`   Target isConnectionPoint: ${targetNode?.data?.isConnectionPoint}`);
+      
       const isNoteConnection = sourceNode?.data?.isNote || targetNode?.data?.isNote;
+      const isAssociationCenterConnection = sourceNode?.data?.isConnectionPoint || targetNode?.data?.isConnectionPoint;
 
 
 
@@ -845,6 +855,16 @@ const BoardPage = () => {
           type: 'NoteConnection',
           isNoteConnection: true,
           selected: false
+        } : isAssociationCenterConnection ? {
+          type: 'AssociationFromCenter',
+          startLabel: '',
+          endLabel: '',
+          label: '',
+          sourceRole: '',
+          targetRole: '',
+          selected: false,
+          isFromAssociationCenter: true, // Marcador especial
+          _localCreated: true
         } : {
           type: 'Association',
           startLabel: '',
@@ -857,14 +877,21 @@ const BoardPage = () => {
           _localCreated: true
         }
       };
+      
+      // 🔍 DEBUG TEMPORAL: Log del edge recién creado
+      console.debug(`📝 Creando nuevo edge:`, newEdge);
+      console.debug(`   Tipo detectado: ${isNoteConnection ? 'Nota' : isAssociationCenterConnection ? 'Desde Centro Asociación' : 'Normal'}`);
+      if (isAssociationCenterConnection) {
+        console.debug(`   ⭐ EDGE CREADO DESDE/HACIA PUNTO DE ASOCIACIÓN - debería originarse visualmente del punto AC`);
+      }
 
       // Debug log: edge being created locally
-      console.debug('BoardPage:onConnect - creating edge', { newEdge, timestamp: Date.now() });
+  // console.debug('BoardPage:onConnect - creating edge', { newEdge, timestamp: Date.now() });
 
       // Use functional setter to avoid stale-closure races when multiple updates
       setEdges((prevEdges) => {
         const updatedEdges = addEdge(newEdge, prevEdges);
-        console.debug('BoardPage:onConnect - setEdges applied', { prevCount: prevEdges.length, newCount: updatedEdges.length });
+  // console.debug('BoardPage:onConnect - setEdges applied', { prevCount: prevEdges.length, newCount: updatedEdges.length });
         // Emit the updated edges to the server so other clients receive it
         try {
           updateBoardData(updatedEdges, "edges");
@@ -1025,6 +1052,40 @@ const BoardPage = () => {
       return;
     }
 
+    // 🎯 ESPERAR A OBTENER LAS COORDENADAS REALES DEL EDGE RENDERIZADO
+    let realLabelX, realLabelY;
+    
+    const waitForRealCoordinates = () => {
+      return new Promise((resolve) => {
+        window.__onAssocEdgeRender = (coords) => {
+          if (coords.edgeId === selectedEdge.id) {
+            realLabelX = coords.realLabelX;
+            realLabelY = coords.realLabelY;
+
+            window.__onAssocEdgeRender = null; // Limpiar
+            resolve();
+          }
+        };
+        
+        // Forzar re-render del edge
+        setEdges(edges => edges.map(e => 
+          e.id === selectedEdge.id 
+            ? { ...e, data: { ...e.data, hasAssociationClass: true } }
+            : e
+        ));
+        
+        // Timeout de seguridad
+        setTimeout(() => {
+          if (!realLabelX) {
+            console.warn('⚠️ Timeout esperando coordenadas reales, usando fallback');
+            resolve();
+          }
+        }, 100);
+      });
+    };
+    
+    await waitForRealCoordinates();
+
     // Calcular dimensiones basadas en CSS real de ClassNode
     const calculateRealNodeDimensions = (node) => {
       // Basado en el CSS actual: width: 340px, padding: 20px
@@ -1074,9 +1135,14 @@ const BoardPage = () => {
     const labelX = (sourceCenterX + targetCenterX) / 2;
     const labelY = (sourceCenterY + targetCenterY) / 2;
     
-    // Usar las coordenadas exactas del label (donde aparece "AC")
-    const midX = labelX;
-    const midY = labelY;
+    // USAR SIEMPRE el cálculo geométrico preciso en lugar del callback del edge
+    // Esto asegura que la línea punteada esté perfectamente centrada
+    const midX = labelX;  // Centro geométrico real
+    const midY = labelY;  // Centro geométrico real
+    
+
+    
+
     
     // Generar nombre único para la clase de asociación
     const existingAssocClasses = nodes.filter(node => 
@@ -1098,40 +1164,33 @@ const BoardPage = () => {
       },
     };
 
-    // Crear un nodo punto visible en el centro de la relación
-    const relationCenterNode = {
-      id: `relation-center-${Date.now()}`,
-      position: { x: midX - 5, y: midY - 5 },
-      type: "classNode",
-      data: {
-        className: '',
-        attributes: [],
-        methods: [],
-        isConnectionPoint: true
-      },
-    };
 
-    // Crear edge punteado de asociación
+
+    // Crear edge punteado de asociación (hacia el punto AC calculado, no un nodo)
     const associationEdge = {
       id: `assoc-edge-${Date.now()}`,
       source: newAssociationNode.id,
       sourceHandle: 'bottom',
-      target: relationCenterNode.id,
-      targetHandle: 'connection-point',
+      target: selectedEdge.target, // Conectar al nodo target, pero visualmente será hacia el AC
+      targetHandle: 'top-center', // Usar handle válido
       type: 'umlEdge',
       style: {
         strokeDasharray: '5,5',
-        stroke: '#ff0000', // Rojo para debugging
-        strokeWidth: 3,    // Más grueso para debugging
+        stroke: '#dc2626', // Rojo para la conexión de AC
+        strokeWidth: 2,
         pointerEvents: 'none'
       },
       data: {
         type: 'AssociationClassConnection',
         isAssociationConnection: true,
         parentRelationId: selectedEdge.id,
-        label: ''
+        label: '',
+        acTargetX: midX, // Coordenadas donde debería terminar visualmente
+        acTargetY: midY
       }
     };
+    
+
 
     // Actualizar el edge original para marcar que tiene clase de asociación
     const updatedSelectedEdge = {
@@ -1144,8 +1203,8 @@ const BoardPage = () => {
       }
     };
 
-    // Actualizar arrays
-    const updatedNodes = [...nodes, newAssociationNode, relationCenterNode];
+    // Actualizar arrays (solo agregar clase de asociación, no relation-center)
+    const updatedNodes = [...nodes, newAssociationNode];
     const updatedEdges = [
       ...edges.map(edge => edge.id === selectedEdge.id ? updatedSelectedEdge : edge),
       associationEdge
@@ -1337,8 +1396,8 @@ const BoardPage = () => {
             onClick={() => {
               try {
                 const events = typeof getDebugEvents === 'function' ? getDebugEvents() : [];
-                console.debug('BoardPage: Debug events (last):', events);
-                console.debug('BoardPage: Current edges snapshot:', edges);
+                // console.debug('BoardPage: Debug events (last):', events);
+                // console.debug('BoardPage: Current edges snapshot:', edges);
                 // Also show a quick alert count for convenience
                 // eslint-disable-next-line no-alert
                 alert(`Debug events: ${events.length} • edges: ${edges.length}`);
