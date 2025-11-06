@@ -9,7 +9,7 @@ import crearPaginaRoutes from '../routes/crearPagina.routes.js';
 import aiRoutes from '../routes/ai.routes.js';
 import healthRoutes from '../routes/health.routes.js';
 import { FRONTEND_URLS } from '../config.js';
-
+import exportRoutes from '../routes/export.routes.js';
 const app = express();
 
 app.use(morgan('dev'));
@@ -41,4 +41,6 @@ app.use('/apis/ai', aiRoutes);
 // Health checks (DB connectivity, etc.)
 app.use('/apis/health', healthRoutes);
 
+// ejemplo - backend/src/app.js (donde montas tus rutas)
+app.use('/apis/export', exportRoutes);
 export default app;

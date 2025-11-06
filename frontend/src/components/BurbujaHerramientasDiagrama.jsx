@@ -2,15 +2,21 @@ import { useState, useRef, useEffect } from 'react';
 
 /**
  * Componente de burbuja FAB con herramientas del diagrama
- * Botón flotante en esquina inferior derecha que abre panel de herramientas
+ * - Mantiene todas las funciones originales.
+ * - Añade un handler React para "Exportar IMG" que llama al endpoint backend
+ *   /apis/export/board/:id y descarga la imagen generada.
+ *
+ * Requisitos en backend (si aún no lo tienes):
+ * - Endpoint POST /apis/export/board/:id que genere la imagen (p. ej. con Puppeteer)
+ * - Si el endpoint requiere autenticación, ajusta `credentials` o headers en la llamada.
  */
 const BurbujaHerramientasDiagrama = ({
   nodes,
   edges,
   setNodes,
   setEdges,
-  selectedNodeIds,
-  selectedEdgeIds,
+  selectedNodeIds = [],
+  selectedEdgeIds = [],
   boardId,
   updateBoardData: updateBoardDataProp,
   userEmail = null,
@@ -20,122 +26,79 @@ const BurbujaHerramientasDiagrama = ({
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const panelRef = useRef(null);
   const fabRef = useRef(null);
+  const [exporting, setExporting] = useState(false);
 
-  // Cerrar panel al hacer clic fuera
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (
-        panelRef.current && 
+        panelRef.current &&
         !panelRef.current.contains(event.target) &&
-        fabRef.current && 
+        fabRef.current &&
         !fabRef.current.contains(event.target)
       ) {
         setIsOpen(false);
       }
     };
-
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [isOpen]);
 
-  // Cerrar con tecla Escape
   useEffect(() => {
     const handleKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        setIsOpen(false);
-      }
+      if (event.key === 'Escape') setIsOpen(false);
     };
-
     if (isOpen) {
       document.addEventListener('keydown', handleKeyDown);
       return () => document.removeEventListener('keydown', handleKeyDown);
     }
   }, [isOpen]);
 
-  // updateBoardData should be provided by parent (useSocketFlow) to persist changes via backend
-  // Fallback: if not provided, try to call no-op and log warning
   const noopUpdate = async (newNodes, newEdges) => {
     console.warn('updateBoardData not provided. Changes will be local only.');
   };
   const updateBoardData = (typeof updateBoardDataProp === 'function') ? updateBoardDataProp : noopUpdate;
 
-  // Herramientas del diagrama
-  const seleccionarTodo = () => {
-    // Esta función requeriría acceso a la instancia de ReactFlow
-    // Por ahora solo cerramos el panel
-    setIsOpen(false);
-  };
-
-  const deseleccionarTodo = () => {
-    // Esta función requeriría acceso a la instancia de ReactFlow
-    // Por ahora solo cerramos el panel
-    setIsOpen(false);
-  };
+  // ---- Herramientas existentes (se mantienen) ----
+  const seleccionarTodo = () => { setIsOpen(false); };
+  const deseleccionarTodo = () => { setIsOpen(false); };
 
   const eliminarSeleccionados = async () => {
     if (selectedNodeIds.length === 0 && selectedEdgeIds.length === 0) return;
-    // Filtrar nodos - eliminar los seleccionados
     const newNodes = nodes.filter(node => !selectedNodeIds.includes(node.id));
-    
-    // Filtrar aristas - eliminar las seleccionadas Y las conectadas a nodos eliminados
-    const newEdges = edges.filter(edge => 
-      !selectedEdgeIds.includes(edge.id) && 
-      !selectedNodeIds.includes(edge.source) && 
+    const newEdges = edges.filter(edge =>
+      !selectedEdgeIds.includes(edge.id) &&
+      !selectedNodeIds.includes(edge.source) &&
       !selectedNodeIds.includes(edge.target)
     );
-
-    // Actualizar estado local
     setNodes(newNodes);
     setEdges(newEdges);
-    
-    // Actualizar Firebase
     await updateBoardData(newNodes, newEdges);
-    
-    // Cerrar panel
     setIsOpen(false);
   };
 
   const duplicarSeleccionados = async () => {
     if (selectedNodeIds.length === 0) return;
-
     const nodesToDuplicate = nodes.filter(node => selectedNodeIds.includes(node.id));
-    const edgesToDuplicate = edges.filter(edge => 
-      selectedNodeIds.includes(edge.source) && selectedNodeIds.includes(edge.target)
-    );
-
-    const duplicatedNodes = nodesToDuplicate.map(node => ({
+    const edgesToDuplicate = edges.filter(edge => selectedNodeIds.includes(edge.source) && selectedNodeIds.includes(edge.target));
+    const duplicatedNodes = nodesToDuplicate.map((node) => ({
       ...node,
       id: `${node.id}_copy_${Date.now()}`,
-      position: {
-        x: node.position.x + 50,
-        y: node.position.y + 50
-      },
-      data: {
-        ...node.data,
-        name: `${node.data?.name || 'Nodo'}_Copia`
-      }
+      position: { x: node.position.x + 50, y: node.position.y + 50 },
+      data: { ...node.data, name: `${node.data?.name || 'Nodo'}_Copia` }
     }));
-
-    // Mapear IDs antiguos a nuevos para las aristas
     const idMap = {};
-    nodesToDuplicate.forEach((node, index) => {
-      idMap[node.id] = duplicatedNodes[index].id;
-    });
-
+    nodesToDuplicate.forEach((n, i) => idMap[n.id] = duplicatedNodes[i].id);
     const duplicatedEdges = edgesToDuplicate.map(edge => ({
       ...edge,
       id: `${edge.id}_copy_${Date.now()}`,
       source: idMap[edge.source] || edge.source,
       target: idMap[edge.target] || edge.target
     }));
-
     const newNodes = [...nodes, ...duplicatedNodes];
     const newEdges = [...edges, ...duplicatedEdges];
-
-    setNodes(newNodes);
-    setEdges(newEdges);
+    setNodes(newNodes); setEdges(newEdges);
     await updateBoardData(newNodes, newEdges);
     setIsOpen(false);
   };
@@ -144,137 +107,93 @@ const BurbujaHerramientasDiagrama = ({
     if (nodes.length === 0 && edges.length === 0) return;
     const localCreatedCount = edges.filter(e => e?.data?._localCreated).length;
     let msg = '¿Estás seguro de que quieres limpiar todo el diagrama?';
-    if (localCreatedCount > 0) {
-      msg += `\n\nNota: hay ${localCreatedCount} aristas no confirmadas localmente (creadas recientemente). Si limpias, se perderán.`;
-    }
+    if (localCreatedCount > 0) msg += `\n\nNota: hay ${localCreatedCount} aristas no confirmadas localmente.`;
     if (window.confirm(msg)) {
-      setNodes([]);
-      setEdges([]);
-      // Call updateBoardData with legacy (nodes, edges) signature - hook is backwards compatible
+      setNodes([]); setEdges([]);
       await updateBoardData([], []);
       setIsOpen(false);
     }
   };
 
   const autoOrganizar = () => {
-    // Implementación básica de auto-organización
     const organizedNodes = nodes.map((node, index) => ({
       ...node,
-      position: {
-        x: (index % 3) * 200 + 100,
-        y: Math.floor(index / 3) * 150 + 100
-      }
+      position: { x: (index % 3) * 200 + 100, y: Math.floor(index / 3) * 150 + 100 }
     }));
-
     setNodes(organizedNodes);
     updateBoardData(organizedNodes, edges);
     setIsOpen(false);
   };
 
   const exportarJSON = () => {
-    const diagramData = {
-      nodes,
-      edges,
-      exportedAt: new Date().toISOString(),
-      boardId
-    };
-
-    const blob = new Blob([JSON.stringify(diagramData, null, 2)], {
-      type: 'application/json'
-    });
-    
+    const diagramData = { nodes, edges, exportedAt: new Date().toISOString(), boardId };
+    const blob = new Blob([JSON.stringify(diagramData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `diagrama_${boardId}_${Date.now()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const a = document.createElement('a'); a.href = url;
+    a.download = `diagrama_${boardId || 'board'}_${Date.now()}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-    
     setIsOpen(false);
   };
 
-  const herramientas = [
-    {
-      id: 'select-all',
-      label: 'Seleccionar Todo',
-      icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      ),
-      action: seleccionarTodo,
-      disabled: nodes.length === 0
-    },
-    {
-      id: 'deselect-all',
-      label: 'Deseleccionar Todo',
-      icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      ),
-      action: deseleccionarTodo,
-      disabled: selectedNodeIds.length === 0 && selectedEdgeIds.length === 0
-    },
-    {
-      id: 'delete-selected',
-      label: 'Eliminar Seleccionados',
-      icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-        </svg>
-      ),
-      action: eliminarSeleccionados,
-      disabled: selectedNodeIds.length === 0 && selectedEdgeIds.length === 0,
-      danger: true
-    },
-    {
-      id: 'duplicate-selected',
-      label: 'Duplicar Seleccionados',
-      icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-        </svg>
-      ),
-      action: duplicarSeleccionados,
-      disabled: selectedNodeIds.length === 0
-    },
-    {
-      id: 'auto-organize',
-      label: 'Auto Organizar',
-      icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-        </svg>
-      ),
-      action: autoOrganizar,
-      disabled: nodes.length === 0
-    },
-    {
-      id: 'export-json',
-      label: 'Exportar JSON',
-      icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-      ),
-      action: exportarJSON,
-      disabled: nodes.length === 0 && edges.length === 0
-    },
-    {
-      id: 'clear-diagram',
-      label: 'Limpiar Diagrama',
-      icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-        </svg>
-      ),
-      action: limpiarDiagrama,
-      disabled: nodes.length === 0 && edges.length === 0,
-      danger: true
+  // ------------------ NUEVO: handler que llama al backend para exportar img ------------------
+  // Asume que tu backend expone POST /apis/export/board/:id que retorna JPEG
+  const handleExportImgClick = async () => {
+    if (!boardId) {
+      alert('No hay boardId disponible para exportar.');
+      return;
     }
+
+    setExporting(true);
+    try {
+      const resp = await fetch(`/apis/export/board/${encodeURIComponent(boardId)}`, {
+        method: 'POST',
+        credentials: 'include' // mantiene cookies si tu backend usa sesiones
+      });
+
+      if (!resp.ok) {
+        let text;
+        try { text = await resp.text(); } catch (e) { text = resp.statusText; }
+        console.error('Export failed:', resp.status, text);
+        alert('Error al exportar la imagen: ' + (text || resp.status));
+        return;
+      }
+
+      const blob = await resp.blob();
+      // Ensure it's an image
+      if (!blob || !blob.type.startsWith('image/')) {
+        console.error('Invalid response type for image export', blob);
+        alert('Respuesta inválida del servidor al exportar la imagen.');
+        return;
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `diagrama_${boardId || 'board'}_${Date.now()}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export error:', err);
+      alert('Error exportando la imagen: ' + (err.message || err));
+    } finally {
+      setExporting(false);
+      setIsOpen(false);
+    }
+  };
+
+  // ------------------ herramientas (incluye botón Exportar IMG wired to handler) ------------------
+  const herramientas = [
+    { id: 'select-all', label: 'Seleccionar Todo', icon: (<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>), action: seleccionarTodo, disabled: nodes.length === 0 },
+    { id: 'deselect-all', label: 'Deseleccionar Todo', icon: (<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>), action: deseleccionarTodo, disabled: selectedNodeIds.length === 0 && selectedEdgeIds.length === 0 },
+    { id: 'delete-selected', label: 'Eliminar Seleccionados', icon: (<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>), action: eliminarSeleccionados, disabled: selectedNodeIds.length === 0 && selectedEdgeIds.length === 0, danger: true },
+    { id: 'duplicate-selected', label: 'Duplicar Seleccionados', icon: (<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>), action: duplicarSeleccionados, disabled: selectedNodeIds.length === 0 },
+    { id: 'auto-organize', label: 'Auto Organizar', icon: (<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>), action: autoOrganizar, disabled: nodes.length === 0 },
+    { id: 'export-json', label: 'Exportar JSON', icon: (<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>), action: exportarJSON, disabled: nodes.length === 0 && edges.length === 0 },
+    { id: 'export-img', label: exporting ? 'Exportando...' : 'Exportar IMG', icon: (<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7h3l2-3h6l2 3h3a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1z" /><circle cx="12" cy="13" r="3" strokeWidth="2" /></svg>), action: handleExportImgClick, disabled: nodes.length === 0 && edges.length === 0 || exporting },
+    { id: 'clear-diagram', label: 'Limpiar Diagrama', icon: (<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>), action: limpiarDiagrama, disabled: nodes.length === 0 && edges.length === 0, danger: true }
   ];
 
   return (
