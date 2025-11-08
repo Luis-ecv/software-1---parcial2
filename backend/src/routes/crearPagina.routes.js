@@ -1,16 +1,19 @@
 import { Router } from 'express';
-import CrearPaginaController from '../controllers/crearPagina.controller.js';
+import CrearPaginaController from '../controllers/crearPagina.controller.clean.js';
 import FlutterExportController from '../controllers/flutterExport.controller.js';
 
 const router = Router();
 
 router.post('/exportarSpringBoot/:id', CrearPaginaController.exportarSpringBootDesdeSala);
 
-router.post('/exportarSpringBoot', CrearPaginaController.exportarSpringBootConRelaciones);
+// Disabled: export by payload is intentionally removed to force export by sala id only.
+// If you need to re-enable payload-based export, add a secured route that validates input and size.
 
 router.post('/exportarFlutter/:id', FlutterExportController.exportarDesdeSala);
 router.post('/exportarFlutter', FlutterExportController.exportarConPayload);
 
+// Keep explicit id-based export route. The generic endpoint that accepted payloads is disabled
+// to enforce server-side export only by saved sala id.
 router.post('/:id', CrearPaginaController.exportar);
 
 export default router;

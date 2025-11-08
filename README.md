@@ -112,12 +112,12 @@ Rutas de diagnóstico (dev):
 
 Exportadores (generación de proyectos):
 - `POST /apis/crearPagina/exportarSpringBoot/:id` — Genera un proyecto Spring Boot a partir de la sala almacenada con el id indicado. Responde con un ZIP (Content-Type: application/zip) que contiene el proyecto Java/Spring Boot listo para descomprimir y ejecutar.
-- `POST /apis/crearPagina/exportarSpringBoot` — Genera un proyecto Spring Boot a partir del payload JSON enviado en el body: `{ elements: [...], connections: [...] }`. Útil cuando el diagrama no está guardado en el servidor.
+- Nota: La exportación por payload (POST `/apis/crearPagina/exportarSpringBoot` con body `{ elements, connections }`) ha sido deshabilitada en el servidor; la generación de proyectos desde el cliente debe realizarse localmente usando la opción de generar en el navegador si la exportación por id falla.
 - `POST /apis/crearPagina/exportarFlutter/:id` — Genera un proyecto Flutter mínimamente funcional (models, services, pages) a partir de la sala guardada con el id indicado. Responde con un ZIP (Content-Type: application/zip) que contiene la app Flutter generada.
 - `POST /apis/crearPagina/exportarFlutter` — Genera un proyecto Flutter a partir del payload JSON enviado en el body: `{ elements: [...], connections: [...] }`. Responde con un ZIP con la estructura del proyecto.
 
 Notas sobre los endpoints de exportación:
-- Las rutas de exportación intentan primero generar el proyecto desde la sala guardada (cuando se usa `/:id`). Si la sala no existe o la exportación por id falla, el endpoint que acepta el payload (`/exportarSpringBoot` o `/exportarFlutter`) permite enviar el diagrama actual (elementos y conexiones) y recibir el ZIP resultante.
+- Las rutas de exportación intentan primero generar el proyecto desde la sala guardada (cuando se usa `/:id`). La exportación por payload en el servidor está deshabilitada; si la exportación por id falla, el frontend puede generar el ZIP localmente en el navegador como alternativa.
 - Los ZIP contienen un README con instrucciones básicas (ej.: `flutter pub get` / `flutter run` para Flutter, `mvnw` o `mvn` para Spring Boot según el proyecto generado).
 - Asegúrate de que el proceso del servidor tenga permisos de escritura en la ruta temporal configurada (por defecto `C:/Users/Public/Documents/proyectos`) o actualiza la variable `rutaBase` en los controladores si es necesario.
 

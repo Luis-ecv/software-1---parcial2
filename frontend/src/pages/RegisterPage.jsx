@@ -49,15 +49,15 @@ const RegisterPage = () => {
           <div className="flex flex-wrap -mx-3 mb-6">
             <div className="w-full px-3 mb-6">
               <label className="block uppercase tracking-wide text-gray-700 text-xs font-bold mb-2">Nombre Completo</label>
-              <input className="appearance-none block w-full bg-white text-gray-900 font-medium border border-gray-400 rounded-lg py-3 px-3 leading-tight focus:outline-none" type="text" required value={user} onChange={(e) => setUser(e.target.value)} />
+              <input id="fullname" name="fullname" autoComplete="name" className="appearance-none block w-full bg-white text-gray-900 font-medium border border-gray-400 rounded-lg py-3 px-3 leading-tight focus:outline-none" type="text" required value={user} onChange={(e) => setUser(e.target.value)} />
             </div>
             <div className="w-full px-3 mb-6">
               <label className="block uppercase tracking-wide text-gray-700 text-xs font-bold mb-2">Correo Electrónico</label>
-              <input className="appearance-none block w-full bg-white text-gray-900 font-medium border border-gray-400 rounded-lg py-3 px-3 leading-tight focus:outline-none" type="email" required value={correo} onChange={(e) => setCorreo(e.target.value)} />
+              <input id="email" name="email" autoComplete="email" className="appearance-none block w-full bg-white text-gray-900 font-medium border border-gray-400 rounded-lg py-3 px-3 leading-tight focus:outline-none" type="email" required value={correo} onChange={(e) => setCorreo(e.target.value)} />
             </div>
             <div className="w-full px-3 mb-6">
               <label className="block uppercase tracking-wide text-gray-700 text-xs font-bold mb-2">Contraseña</label>
-              <input className="appearance-none block w-full bg-white text-gray-900 font-medium border border-gray-400 rounded-lg py-3 px-3 leading-tight focus:outline-none" type="password" required value={pass} onChange={(e) => setPass(e.target.value)} />
+              <input id="password" name="password" autoComplete="new-password" className="appearance-none block w-full bg-white text-gray-900 font-medium border border-gray-400 rounded-lg py-3 px-3 leading-tight focus:outline-none" type="password" required value={pass} onChange={(e) => setPass(e.target.value)} />
             </div>
 
             {/* Mostrar mensaje de error si ocurre */}

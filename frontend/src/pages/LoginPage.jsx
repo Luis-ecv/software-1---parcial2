@@ -50,6 +50,9 @@ const LoginPage = () => {
             <div className="w-full md:w-full px-3 mb-6">
               <label className="block uppercase tracking-wide text-gray-700 text-xs font-bold mb-2" htmlFor="email">Email address</label>
               <input
+                id="email"
+                name="email"
+                autoComplete="email"
                 className="appearance-none block w-full bg-white text-gray-900 font-medium border border-gray-400 rounded-lg py-3 px-3 leading-tight focus:outline-none"
                 type="email"
                 required
@@ -60,6 +63,9 @@ const LoginPage = () => {
             <div className="w-full md:w-full px-3 mb-6">
               <label className="block uppercase tracking-wide text-gray-700 text-xs font-bold mb-2" htmlFor="password">Password</label>
               <input
+                id="password"
+                name="password"
+                autoComplete="current-password"
                 className="appearance-none block w-full bg-white text-gray-900 font-medium border border-gray-400 rounded-lg py-3 px-3 leading-tight focus:outline-none"
                 type="password"
                 required
@@ -69,7 +75,7 @@ const LoginPage = () => {
             </div>
             <div className="w-full flex items-center justify-between px-3 mb-3">
               <label htmlFor="remember" className="flex items-center w-1/2">
-                <input type="checkbox" name="remember" className="mr-1 bg-white" />
+                <input id="remember" type="checkbox" name="remember" className="mr-1 bg-white" />
                 <span className="text-sm text-gray-700 pt-1">Remember Me</span>
               </label>
               <div className="w-1/2 text-right">

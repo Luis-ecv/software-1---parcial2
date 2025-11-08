@@ -729,6 +729,36 @@ const BoardPage = () => {
         willOpen: () => Swal.showLoading()
       });
 
+      // Ensure current board is saved on server before requesting export by id
+      try {
+        const saveAck = await guardarEstado({ nodes, edges });
+        // guardarEstado resolves with ack from server when joined; if it returns an object
+        // without success or with error, we treat as failure to persist and abort server export.
+        if (!saveAck || (saveAck.success === false) || saveAck.error) {
+          console.warn('No se confirmó guardado en servidor antes de export:', saveAck);
+          Swal.close();
+          Swal.fire({
+            icon: 'warning',
+            title: 'No se pudo guardar en servidor',
+            text: 'El diagrama no pudo ser guardado en el servidor. Se intentará generar el proyecto en el cliente.'
+          });
+          const projectName = `UMLProject_${boardId}`;
+          await generateCompleteProject(nodes, edges, projectName);
+          return;
+        }
+      } catch (saveErr) {
+        console.warn('guardarEstado error:', saveErr);
+        Swal.close();
+        Swal.fire({
+          icon: 'warning',
+          title: 'Error guardando diagrama',
+          text: 'No se pudo guardar el diagrama en el servidor. Se intentará generar localmente.'
+        });
+        const projectName = `UMLProject_${boardId}`;
+        await generateCompleteProject(nodes, edges, projectName);
+        return;
+      }
+
       // POST to backend endpoint that exports Spring Boot project from sala id
       const exportUrl = `${import.meta.env.VITE_API_BASE || ''}/apis/crearPagina/exportarSpringBoot/${boardId}`;
       const resp = await fetch(exportUrl, {
@@ -737,36 +767,12 @@ const BoardPage = () => {
       });
 
       if (!resp.ok) {
-        // Try sending current diagram to server endpoint that accepts elements+connections
-        console.warn('Backend export by id failed, status:', resp.status);
-        try {
-          const altUrl = `${import.meta.env.VITE_API_BASE || ''}/apis/crearPagina/exportarSpringBoot`;
-          const altResp = await fetch(altUrl, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ elements: nodes, connections: edges })
-          });
-          if (altResp.ok) {
-            const altBlob = await altResp.blob();
-            const { saveAs } = await import('file-saver');
-            const altFileName = `uml-${boardId}-springboot-from-client.zip`;
-            saveAs(altBlob, altFileName);
-            Swal.close();
-            Swal.fire({ icon: 'success', title: '✅ Exportado desde servidor (con payload)', html: `<p>Archivo: <strong>${altFileName}</strong></p>` });
-            return;
-          }
-          console.warn('Server export with payload also failed, status:', altResp.status);
-        } catch (altErr) {
-          console.warn('Alt server export failed:', altErr);
-        }
-
-        // Backend failed — fall back to client-side generator
+        // Server-side export by id failed. Payload-based server export is disabled.
         Swal.close();
         Swal.fire({
           icon: 'warning',
           title: 'Exportación en servidor fallida',
-          text: 'Se intentará generar el proyecto en el cliente como alternativa.'
+          text: 'La exportación por payload en servidor no está disponible. Se intentará generar el proyecto en el cliente.'
         });
         const projectName = `UMLProject_${boardId}`;
         await generateCompleteProject(nodes, edges, projectName);
@@ -1356,7 +1362,7 @@ const BoardPage = () => {
             Postman
           </button>
 
-          {/* Botón de generación Full Stack Completo */}
+          {/* Botón de generación Spring Boot */}
           <button
             onClick={() => handleGenerateCompleteProject()}
             className="btn-secondary bg-gradient-to-r from-blue-500 to-sky-600 text-white px-4 py-2 rounded-md flex items-center gap-2"
@@ -1374,7 +1380,7 @@ const BoardPage = () => {
                 d="M19 11H5m14 0a4 4 0 01-4 4H9a4 4 0 01-4-4m14 0a4 4 0 00-4-4h6a4 4 0 014 4z"
               />
             </svg>
-            Full Stack C
+            Spring Boot
           </button>
 
           {/* Botón de generación Flutter (server-side) */}
