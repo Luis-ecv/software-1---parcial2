@@ -2,7 +2,7 @@ import { Router } from "express";
 import usersalaController from '../controllers/usersala.controllers.js';
 
 import { authRequired } from '../middlewares/validateToken.js';
-import usersalaSchema from '../schemas/userSalaSchema.js';
+import usersalaSchema from '../schemas/usersalaSchema.js';
 import validateSchema from '../middlewares/validateSchema.js';
 
 const router = Router();
