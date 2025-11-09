@@ -1,0 +1,8 @@
+{
+  "build": {
+    "buildCommand": "npm ci && chmod +x node_modules/.bin/* && npm run build"
+  },
+  "deploy": {
+    "staticSite": true
+  }
+}
