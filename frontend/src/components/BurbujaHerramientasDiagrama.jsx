@@ -146,7 +146,10 @@ const BurbujaHerramientasDiagrama = ({
 
     setExporting(true);
     try {
-      const resp = await fetch(`/apis/export/board/${encodeURIComponent(boardId)}`, {
+      // Prefer backend API base configured via Vite env (must include protocol in prod)
+      const apiBase = import.meta.env.VITE_API_BASE;
+      const requestUrl = apiBase ? `${apiBase.replace(/\/$/, '')}/apis/export/board/${encodeURIComponent(boardId)}` : `/apis/export/board/${encodeURIComponent(boardId)}`;
+      const resp = await fetch(requestUrl, {
         method: 'POST',
         credentials: 'include' // mantiene cookies si tu backend usa sesiones
       });
