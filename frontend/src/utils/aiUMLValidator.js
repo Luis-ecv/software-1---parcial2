@@ -331,11 +331,11 @@ export const verifyUMLDiagramWithAI = async (nodes, edges, boardId, provider = D
     let resultado;
 
     if (apiBase) {
-      const url = `${apiBase.replace(/\/$/, '')}/apis/ai/generate-diagram`;
+      const url = `${apiBase.replace(/\/$/, '')}/apis/ai/verify-diagram`;
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'text', content: userPrompt })
+        body: JSON.stringify({ systemPrompt, userPrompt })
       });
 
       if (!resp.ok) {

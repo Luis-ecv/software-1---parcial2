@@ -480,8 +480,9 @@ class AIController {
                 throw new Error('No se pudo procesar la entrada');
             }
 
-            // Generate UML diagram using OpenAI
-            const diagram = await AIController.generateUMLFromText(userInput);
+            // Generate UML diagram using OpenAI/Gemini (allow optional model override)
+            const requestedModel = req.body?.model || null;
+            const diagram = await AIController.generateUMLFromText(userInput, requestedModel);
 
             // Log diagram summary for debugging (no sensitive data)
             try {
@@ -508,7 +509,7 @@ class AIController {
     }
 
     // Generate UML diagram using Gemini
-    static async generateUMLFromText(userInput) {
+    static async generateUMLFromText(userInput, modelArg = null) {
         try {
             // OpenAI implementation (commented out)
             /*
@@ -530,9 +531,9 @@ class AIController {
             const response = completion.choices[0].message.content.trim();
             */
 
-            // Gemini implementation (model configurable via GEMINI_MODEL env var)
-            const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-            const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+            // Gemini implementation (model can be overridden by modelArg or via GEMINI_MODEL env var)
+            const MODEL = modelArg || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+            const model = genAI.getGenerativeModel({ model: MODEL });
             const prompt = `${SYSTEM_PROMPT}\n\nGenera un diagrama UML de clases basado en: ${userInput}`;
             const result = await model.generateContent(prompt);
             const response = await result.response;
@@ -557,8 +558,8 @@ class AIController {
             const noElements = !diagram.elements || (Array.isArray(diagram.elements) && diagram.elements.length === 0);
             if (noElements && Array.isArray(diagram.clarifyingQuestions) && diagram.clarifyingQuestions.length > 0) {
                 try {
-                    const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-                    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+                    const BEST_MODEL = modelArg || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+                    const model = genAI.getGenerativeModel({ model: BEST_MODEL });
                     // Ask the model for a best-effort diagram: infer reasonable defaults and mark inferred:true
                     const bestEffortPrompt = `${SYSTEM_PROMPT}\n\nEl usuario ha dado información insuficiente. Genera un DIAGRAMA por defecto de "mejor esfuerzo" a partir de la entrada original: ${userInput}.\nSi debes inferir tipos o atributos, inclúyelos y marca cada atributo inferido con \"inferred\": true.\nDevuelve solamente JSON válido que contenga al menos elementos[] con clases.\nNo incluyas explicaciones.`;
                     const best = await model.generateContent(bestEffortPrompt);
@@ -630,8 +631,8 @@ class AIController {
                         console.warn('AI diagram failed schema validation:', validateDiagram.errors);
                         // Attempt one retry asking the model to return a JSON that matches the schema exactly
                         try {
-                            const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-                            const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+                            const RETRY_MODEL = modelArg || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+                            const model = genAI.getGenerativeModel({ model: RETRY_MODEL });
                             const correctionPrompt = `${SYSTEM_PROMPT}\n\nLa respuesta anterior no cumplió el esquema esperado. Devuelve ÚNICAMENTE un JSON válido que cumpla este esquema: ${JSON.stringify(DIAGRAM_SCHEMA)}\nBasado en la entrada original: ${userInput}\nPor favor devuelve solo JSON sin explicaciones.`;
                             const retryResult = await model.generateContent(correctionPrompt);
                             const retryResp = await retryResult.response;
@@ -785,14 +786,16 @@ class AIController {
     // Get available AI features
     static async getAIFeatures(req, res) {
         try {
-            const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+            // Support multiple models via GEMINI_MODELS env (comma-separated)
+            const modelsEnv = process.env.GEMINI_MODELS || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+            const models = Array.isArray(modelsEnv) ? modelsEnv : String(modelsEnv).split(',').map(s => s.trim()).filter(Boolean);
             res.json({
                 success: true,
                 features: {
                     textToUML: true,
                     voiceToUML: true,
                     imageToUML: true,
-                    models: [GEMINI_MODEL]
+                    models
                 }
             });
         } catch (error) {
@@ -800,6 +803,55 @@ class AIController {
                 success: false,
                 error: error.message
             });
+        }
+    }
+
+    // Verify a diagram by forwarding systemPrompt/userPrompt to Gemini server-side
+    static async verifyDiagram(req, res) {
+        try {
+            const { systemPrompt, userPrompt, model } = req.body || {};
+            if (!systemPrompt || !userPrompt) {
+                return res.status(400).json({ success: false, error: 'systemPrompt and userPrompt are required' });
+            }
+
+            if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your_gemini_api_key_here') {
+                return res.status(400).json({ success: false, error: 'Gemini API key not configured on server' });
+            }
+
+            const MODEL = model || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+            const genModel = genAI.getGenerativeModel({ model: MODEL });
+
+            const bodyText = `${systemPrompt}\n\n${userPrompt}`;
+            const result = await genModel.generateContent(bodyText);
+            const response = await result.response;
+            const text = await response.text();
+
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+            } catch (err) {
+                const jsonMatch = String(text).match(/\{[\s\S]*\}/);
+                if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+                else throw new Error('La respuesta de Gemini no contiene JSON válido');
+            }
+
+            // Validate required verification fields expected by frontend
+            const requiredFields = [
+                'okEstructural', 'islas', 'referenciasRotas', 'ciclosHerencia',
+                'scoreDiseno', 'sugerencias', 'accionesPrioritarias', 'tags',
+                'nodosProblematicos', 'aristasProblematicas', 'usoHallazgosLocales', 'limitaciones'
+            ];
+
+            for (const f of requiredFields) {
+                if (!(f in parsed)) {
+                    return res.status(502).json({ success: false, error: `Campo requerido faltante en respuesta de IA: ${f}`, fieldMissing: f, raw: parsed });
+                }
+            }
+
+            return res.json(parsed);
+        } catch (error) {
+            console.error('Error en verifyDiagram:', error);
+            return res.status(500).json({ success: false, error: error.message || String(error) });
         }
     }
 }

@@ -93,6 +93,15 @@ router.post('/generate-diagram/image', handleMultipleFormats, (req, res, next) =
         next(err);
     }
 });
+// Verification endpoint: accepts systemPrompt + userPrompt (or nodes/edges) and
+// runs the AI verification flow server-side to avoid exposing API keys.
+router.post('/verify-diagram', async (req, res, next) => {
+    try {
+        return await AIController.verifyDiagram(req, res, next);
+    } catch (err) {
+        next(err);
+    }
+});
 router.get('/features', AIController.getAIFeatures);
 
 // Dry-run modify: accepts current nodes/edges + prompt and returns a proposed merged state (does not apply changes)
