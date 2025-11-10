@@ -175,6 +175,68 @@ const ajv = new Ajv({ allErrors: true, strict: false });
 const validateDiagram = ajv.compile(DIAGRAM_SCHEMA);
 
 class AIController {
+    // Helper: sleep for ms
+    static sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Try generating content with a single model with retries and exponential backoff.
+    // Throws unless a successful text is returned.
+    static async _tryGenerateWithModel(modelName, prompt, maxAttempts = 3) {
+        const model = genAI.getGenerativeModel({ model: modelName });
+        let attempt = 0;
+        while (attempt < maxAttempts) {
+            attempt++;
+            try {
+                const result = await model.generateContent(prompt);
+                const response = await result.response;
+                const text = await response.text();
+                return text;
+            } catch (err) {
+                const msg = err && err.message ? err.message : String(err);
+                // If model overloaded (503) try again after backoff, otherwise rethrow
+                if (/503|Service Unavailable|overload|overloaded/i.test(msg)) {
+                    const backoff = Math.pow(2, attempt) * 500 + Math.floor(Math.random() * 500);
+                    console.warn(`Model ${modelName} attempt ${attempt} failed with 503-ish error, backing off ${backoff}ms`);
+                    await AIController.sleep(backoff);
+                    // continue to retry
+                } else {
+                    // non-retryable error
+                    throw err;
+                }
+            }
+        }
+        // Exhausted retries for this model
+        const err = new Error(`Model ${modelName} exhausted retries (likely overloaded)`);
+        err.code = 'MODEL_OVERLOADED';
+        throw err;
+    }
+
+    // Try a list of models in order. For each model, attempt to generate; on overload try next model.
+    static async _generateUsingModels(modelsList, prompt) {
+        const arr = Array.isArray(modelsList) ? modelsList : String(modelsList || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (arr.length === 0) arr.push('gemini-2.5-flash');
+        let lastError = null;
+        for (const m of arr) {
+            try {
+                const text = await AIController._tryGenerateWithModel(m, prompt, 3);
+                return { model: m, text };
+            } catch (err) {
+                lastError = err;
+                // If exhausted retries (MODEL_OVERLOADED) try next model; otherwise break and throw
+                if (err && err.code === 'MODEL_OVERLOADED') {
+                    console.warn(`Model ${m} overloaded, trying next model if available`);
+                    continue;
+                } else {
+                    throw err;
+                }
+            }
+        }
+        // If we reach here, all models exhausted
+        const e = new Error(`All models exhausted or overloaded. Last error: ${lastError?.message || String(lastError)}`);
+        e.cause = lastError;
+        throw e;
+    }
     // Modify existing diagram based on a prompt (supports add/update/remove operations)
     static async modifyDiagram(req, res) {
         try {
@@ -531,13 +593,20 @@ class AIController {
             const response = completion.choices[0].message.content.trim();
             */
 
-            // Gemini implementation (model can be overridden by modelArg or via GEMINI_MODEL env var)
-            const MODEL = modelArg || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-            const model = genAI.getGenerativeModel({ model: MODEL });
+            // Gemini implementation with retries and optional model list/fallback
+            const modelsEnv = modelArg ? [modelArg] : (process.env.GEMINI_MODELS || process.env.GEMINI_MODEL || 'gemini-2.5-flash');
+            const modelsList = Array.isArray(modelsEnv) ? modelsEnv : String(modelsEnv).split(',').map(s => s.trim()).filter(Boolean);
             const prompt = `${SYSTEM_PROMPT}\n\nGenera un diagrama UML de clases basado en: ${userInput}`;
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            const text = await response.text();
+
+            // Try models with retries and fallback; returns { model, text }
+            let genResult;
+            try {
+                genResult = await AIController._generateUsingModels(modelsList, prompt);
+            } catch (err) {
+                console.error('All models failed in generateUMLFromText:', err);
+                throw new Error(`All models failed or overloaded: ${err.message}`);
+            }
+            const text = genResult.text;
 
             // Try to parse the JSON response
             let diagram;
@@ -818,13 +887,20 @@ class AIController {
                 return res.status(400).json({ success: false, error: 'Gemini API key not configured on server' });
             }
 
-            const MODEL = model || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-            const genModel = genAI.getGenerativeModel({ model: MODEL });
-
+            // Build models list and attempt generation with retries/fallback
+            const modelsEnv = model ? [model] : (process.env.GEMINI_MODELS || process.env.GEMINI_MODEL || 'gemini-2.5-flash');
+            const modelsList = Array.isArray(modelsEnv) ? modelsEnv : String(modelsEnv).split(',').map(s => s.trim()).filter(Boolean);
             const bodyText = `${systemPrompt}\n\n${userPrompt}`;
-            const result = await genModel.generateContent(bodyText);
-            const response = await result.response;
-            const text = await response.text();
+
+            let genResult;
+            try {
+                genResult = await AIController._generateUsingModels(modelsList, bodyText);
+            } catch (err) {
+                console.error('All models failed in verifyDiagram:', err);
+                return res.status(502).json({ success: false, error: `All models failed or overloaded: ${err.message}` });
+            }
+
+            const text = genResult.text;
 
             let parsed;
             try {
