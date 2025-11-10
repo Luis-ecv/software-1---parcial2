@@ -323,12 +323,40 @@ export const verifyUMLDiagramWithAI = async (nodes, edges, boardId, provider = D
     // 4. Construir prompt para IA
     const { systemPrompt, userPrompt } = buildAIPrompt(ui_context, resumen_json, resultados_locales_json);
 
-    // 5. Llamar a Gemini (único proveedor soportado)
-    if (provider !== 'GEMINI') {
-      throw new Error(`Solo se soporta Gemini. Proveedor solicitado: ${provider}`);
+    // 5. Preferir llamar al backend para evitar exponer la clave de Gemini en el cliente.
+    // Si VITE_API_BASE está configurado (build prod), hacemos proxy a /apis/ai/generate-diagram
+    // en el backend. Si no está presente (dev local), se hace la llamada directa a Gemini
+    // para mantener la compatibilidad.
+    const apiBase = import.meta.env.VITE_API_BASE;
+    let resultado;
+
+    if (apiBase) {
+      const url = `${apiBase.replace(/\/$/, '')}/apis/ai/generate-diagram`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'text', content: userPrompt })
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`AI backend error ${resp.status}: ${text}`);
+      }
+
+      const json = await resp.json();
+      if (!json || json.success === false) {
+        throw new Error(json?.error || 'AI backend returned unsuccessful response');
+      }
+
+      // Expect backend to return generated diagram in `diagram` field
+      resultado = json.diagram || json;
+    } else {
+      // 5.b Fallback directo a Gemini (mantener compatibilidad en entornos donde no hay backend configurado)
+      if (provider !== 'GEMINI') {
+        throw new Error(`Solo se soporta Gemini. Proveedor solicitado: ${provider}`);
+      }
+      resultado = await callGeminiAPI(systemPrompt, userPrompt);
     }
-    
-    const resultado = await callGeminiAPI(systemPrompt, userPrompt);
 
     // 6. Validar que la respuesta tenga el formato correcto
     const requiredFields = [
