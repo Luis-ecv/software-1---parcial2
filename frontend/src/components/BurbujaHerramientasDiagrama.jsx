@@ -151,7 +151,9 @@ const BurbujaHerramientasDiagrama = ({
       const requestUrl = apiBase ? `${apiBase.replace(/\/$/, '')}/apis/export/board/${encodeURIComponent(boardId)}` : `/apis/export/board/${encodeURIComponent(boardId)}`;
       const resp = await fetch(requestUrl, {
         method: 'POST',
-        credentials: 'include' // mantiene cookies si tu backend usa sesiones
+        credentials: 'include', // mantiene cookies si tu backend usa sesiones
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodes, edges })
       });
 
       if (!resp.ok) {
