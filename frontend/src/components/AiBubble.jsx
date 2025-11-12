@@ -56,7 +56,7 @@ const parseCardinality = (cardinality) => {
 };
 
 // Minimal AI Bubble component: floating FAB -> panel with input + history
-export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, updateBoardData }) {
+export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, updateBoardData, onAiModificationChange }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -77,6 +77,70 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
   // Estados para manejo de clarificaciones en modificaciones
   const [pendingClarification, setPendingClarification] = useState(null);
   const [clarificationResponse, setClarificationResponse] = useState('');
+  
+  // Estado para controlar la pestaña desplegable de ejemplos
+  const [showExamples, setShowExamples] = useState(false);
+  
+  // Flag para controlar sincronización durante modificaciones de IA
+  const [aiModificationInProgress, setAiModificationInProgress] = useState(false);
+
+  // Lista completa de ejemplos de comandos soportados
+  const commandExamples = {
+    "Gestión de Clases": [
+      "añade clase Usuario con atributos nombre: string, email: string",
+      "elimina la clase Cliente",
+      "renombra la clase Producto a Item",
+      "cambia el nombre de clase Order a Pedido"
+    ],
+    "Gestión de Atributos": [
+      "añade atributo edad: int a la clase Usuario",
+      "agrega atributo precio: decimal(10,2) a Producto", 
+      "elimina el atributo telefono de Cliente",
+      "borra atributo stock de la clase Producto",
+      "actualiza el tipo del atributo nombre a string en Usuario"
+    ],
+    "Gestión de Métodos": [
+      "añade método calcular(): float a la clase Factura",
+      "agrega método obtenerTotal(): decimal a Pedido",
+      "elimina el método setNombre de Usuario",
+      "actualiza el método procesar en la clase Order"
+    ],
+    "Relaciones - Cambiar Tipo": [
+      "modifica la relación entre Usuario y Pedido a composición",
+      "cambia la relación entre Cliente y Factura a agregación",
+      "convierte la asociación entre Orden y Item en herencia",
+      "actualiza la relación de ClaseHija a ClasePadre como generalización",
+      "cambia la relación A-B a implementación",
+      "modifica la relación entre Servicio y Cliente a dependencia"
+    ],
+    "Relaciones - Cardinalidades": [
+      "cambia la cardinalidad de Cliente a Pedido a 1:*",
+      "actualiza la cardinalidad entre Producto y LineaPedido a 1:*", 
+      "modifica la multiplicidad de Usuario-Rol a muchos a muchos (*:*)",
+      "establece la cardinalidad Persona-Pasaporte como uno a uno (1:1)",
+      "cambia la cardinalidad de Departamento a Empleado a 1..*"
+    ],
+    "Relaciones - Crear/Eliminar": [
+      "añade relación de herencia de ClaseHija a ClasePadre",
+      "crea composición entre Contenedor y Item con cardinalidad 1:*",
+      "agrega asociación de Cliente a Pedido",
+      "establece dependencia entre ClaseA y ClaseB",
+      "elimina la relación entre ClaseX y ClaseY",
+      "quita la herencia de SubClase a SuperClase"
+    ],
+    "Operaciones Complejas": [
+      "elimina clase Temporal y redirige sus relaciones a ClasePrincipal",
+      "renombra Usuario a Cliente y añade atributo telefono: string",
+      "crea clase Direccion con atributos calle, ciudad y relacióna con Usuario",
+      "modifica Producto: añade atributo categoria y relación con Proveedor"
+    ]
+  };
+
+  // Función para insertar un ejemplo en el textarea
+  const insertExample = (example) => {
+    setInput(example);
+    setShowExamples(false);
+  };
 
   // Initialize editedDiagram when entering 'edit' mode based on the last AI diagram message
   useEffect(() => {
@@ -104,6 +168,13 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
     };
     setEditedDiagram(copy);
   }, [mode, messages]);
+
+  // Debug: Monitor changes in nodes and edges props
+  useEffect(() => {
+    console.log('🔄 AiBubble: Props changed - nodes:', nodes?.length || 0, 'edges:', edges?.length || 0);
+    console.log('🔍 AiBubble: Current nodes:', nodes);
+    console.log('🔍 AiBubble: Current edges:', edges);
+  }, [nodes, edges]);
 
   // Helper to normalize attributes/methods to string array to avoid React rendering objects
   const normalizeStringArray = (maybeArr) => {
@@ -304,7 +375,42 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
         type = 'voice';
       }
 
-      const res = await generateDiagram({ type, content: text, file, salaId: boardId });
+      // Determine if this should be a modification or generation
+      const modificationKeywords = [
+        'modifica', 'cambiar', 'cambio', 'editar', 'edita', 'actualizar', 
+        'actualiza', 'modificar', 'alterar', 'corregir', 'corrige', 'ajustar',
+        'ajusta', 'reemplazar', 'reemplaza', 'sustituir', 'sustituye', 
+        'elimina', 'eliminar', 'borrar', 'borra', 'quitar', 'quita', 'remover', 'remeve'
+      ];
+      
+      const isModification = mode === 'edit' || 
+                           (nodes && nodes.length > 0) && 
+                           modificationKeywords.some(keyword => 
+                             text.toLowerCase().includes(keyword)
+                           );
+
+      let res;
+      if (isModification) {
+        // Use modify diagram for edits
+        console.log('🔍 AiBubble: Enviando modificación con estado actual:', {
+          nodesCount: (nodes || []).length,
+          edgesCount: (edges || []).length,
+          prompt: text,
+          nodes: nodes || [],
+          edges: edges || []
+        });
+        
+        res = await modifyDiagram({ 
+          nodes: nodes || [], 
+          edges: edges || [], 
+          prompt: text,
+          mode: 'modify',
+          salaId: boardId
+        });
+      } else {
+        // Use generate diagram for new creations
+        res = await generateDiagram({ type, content: text, file, salaId: boardId });
+      }
 
       if (!res || !res.success) {
         const errMsg = res && res.error ? res.error : 'AI response failed';
@@ -313,23 +419,88 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
         return;
       }
 
-      // The backend returns a demo or real diagram under `diagram` property
-      // If AI returned clarifying questions but also returned a diagram, show questions but still merge.
-      // Only block merging when there are clarifyingQuestions and NO elements were produced.
-      if (res.diagram && Array.isArray(res.diagram.clarifyingQuestions) && res.diagram.clarifyingQuestions.length > 0 && (!res.diagram.elements || res.diagram.elements.length === 0)) {
-        const qText = res.diagram.clarifyingQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n');
-        pushMessage({ role: 'ai', text: res.message || 'Se requieren aclaraciones:', questions: res.diagram.clarifyingQuestions });
-        // Also push a human-readable block so user sees the questions in the history
-        pushMessage({ role: 'ai', text: qText });
+      // Handle different response formats
+      let diagramData = null;
+      
+      if (isModification && res.newState) {
+        // modifyDiagram returns newState with nodes and edges
+        // For modifications, we need to replace the entire board state, not merge
+        console.log('🔄 AiBubble: Applying AI modification result', res.newState);
+        
+        // Set flag to prevent WebSocket conflicts during AI modifications
+        setAiModificationInProgress(true);
+        if (onAiModificationChange) onAiModificationChange(true);
+        
+        console.log('📝 AiBubble: Estado antes de modificación:', {
+          currentNodes: nodes?.length || 0,
+          currentEdges: edges?.length || 0,
+          newNodes: res.newState.nodes?.length || 0,
+          newEdges: res.newState.edges?.length || 0
+        });
+        
+        // Apply changes to local state immediately with protection
+        const newNodes = res.newState.nodes || [];
+        const newEdges = res.newState.edges || [];
+        
+        console.log('🛡️ AiBubble: Aplicando cambios protegidos contra WebSocket');
+        
+        // Apply changes multiple times to ensure they stick
+        const applyChanges = () => {
+          setNodes([...newNodes]);
+          setEdges([...newEdges]);
+        };
+        
+        // Apply immediately
+        applyChanges();
+        
+        // Apply again after short delay to override any WebSocket interference
+        setTimeout(applyChanges, 50);
+        setTimeout(applyChanges, 200);
+        
+        // Sync with server after local changes are established
+        setTimeout(() => {
+          if (updateBoardData && boardId) {
+            console.log('💾 AiBubble: Sincronizando estado final con servidor');
+            updateBoardData({
+              nodes: newNodes,
+              edges: newEdges
+            });
+          }
+          
+          // Clear protection flag after sync
+          setTimeout(() => {
+            setAiModificationInProgress(false);
+            if (onAiModificationChange) onAiModificationChange(false);
+            console.log('✅ AiBubble: Modificación de IA completada, protección removida');
+          }, 100);
+        }, 800); // Longer delay to ensure local state is solid
+        
+        // Skip the mergeDiagramIntoBoard process for modifications
+        const defaultMessage = 'Diagrama modificado correctamente';
+        pushMessage({ role: 'ai', text: res.message || defaultMessage });
         setLoading(false);
+        if (fileRef.current) fileRef.current.value = '';
         return;
+      } else if (res.diagram) {
+        // generateDiagram returns diagram property
+        diagramData = res.diagram;
+        
+        // Handle clarifying questions for generation
+        if (Array.isArray(diagramData.clarifyingQuestions) && diagramData.clarifyingQuestions.length > 0 && (!diagramData.elements || diagramData.elements.length === 0)) {
+          const qText = diagramData.clarifyingQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n');
+          pushMessage({ role: 'ai', text: res.message || 'Se requieren aclaraciones:', questions: diagramData.clarifyingQuestions });
+          pushMessage({ role: 'ai', text: qText });
+          setLoading(false);
+          return;
+        }
       }
 
-      pushMessage({ role: 'ai', text: res.message || 'Diagrama generado', diagram: res.diagram });
+      const defaultMessage = isModification ? 'Diagrama modificado' : 'Diagrama generado';
+      pushMessage({ role: 'ai', text: res.message || defaultMessage, diagram: diagramData });
 
       // Merge diagram into board
-      if (res.diagram) {
-        await mergeDiagramIntoBoard(res.diagram);
+      if (diagramData) {
+        await mergeDiagramIntoBoard(diagramData);
       }
 
     } catch (err) {
@@ -606,6 +777,51 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                           />
+                          
+                          {/* Pestaña desplegable de ejemplos */}
+                          <div className="mb-3">
+                            <button
+                              type="button"
+                              onClick={() => setShowExamples(!showExamples)}
+                              className="flex items-center justify-between w-full px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md hover:bg-indigo-100 transition-colors"
+                            >
+                              <span className="flex items-center gap-2">
+                                📚 Ejemplos de comandos soportados
+                              </span>
+                              <svg 
+                                className={`w-4 h-4 transform transition-transform ${showExamples ? 'rotate-180' : ''}`} 
+                                fill="none" 
+                                stroke="currentColor" 
+                                viewBox="0 0 24 24"
+                              >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </button>
+                            
+                            {showExamples && (
+                              <div className="mt-2 border border-indigo-200 rounded-md bg-white shadow-sm max-h-64 overflow-y-auto">
+                                {Object.entries(commandExamples).map(([category, examples], categoryIndex) => (
+                                  <div key={categoryIndex} className="border-b border-gray-100 last:border-b-0">
+                                    <div className="px-3 py-2 bg-gray-50 text-xs font-semibold text-gray-700 border-b border-gray-200">
+                                      {category}
+                                    </div>
+                                    <div className="divide-y divide-gray-100">
+                                      {examples.map((example, exampleIndex) => (
+                                        <button
+                                          key={exampleIndex}
+                                          type="button"
+                                          onClick={() => insertExample(example)}
+                                          className="w-full px-3 py-2 text-left text-xs text-gray-700 hover:bg-indigo-50 hover:text-indigo-800 transition-colors"
+                                        >
+                                          {example}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                           
                           {/* Botón principal de modificación */}
                           <div className="flex gap-2 justify-end">

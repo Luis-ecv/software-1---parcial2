@@ -18,7 +18,14 @@ try {
 // System prompt específico para edición de diagramas UML
 const EDITOR_SYSTEM_PROMPT = `Eres un asistente especializado en EDICIÓN Y MODIFICACIÓN de diagramas UML de clases existentes.
 
-OBJETIVO: Modificar un diagrama UML existente basándote en las instrucciones del usuario. Producir SÓLO un objeto JSON válido que refleje los cambios solicitados.
+🚨 REGLAS CRÍTICAS - SIGUE ESTRICTAMENTE:
+1. **NO CREAR NUEVAS CLASES** a menos que se solicite explícitamente con "crear", "añadir", "agregar"
+2. **PRESERVAR TODAS LAS CLASES EXISTENTES** que no se mencionen para eliminación
+3. **MANTENER TODOS LOS IDs ORIGINALES** de elementos existentes
+4. **SOLO MODIFICAR** los elementos específicamente mencionados en la instrucción
+5. **PARA ELIMINACIONES**: Omitir completamente del resultado final el elemento a eliminar
+
+OBJETIVO: Modificar un diagrama UML existente basándote en las instrucciones del usuario. Producir SÓLO un objeto JSON válido que refleje los cambios solicitados SOBRE EL ESTADO ACTUAL.
 
 🎯 OPERACIONES DE EDICIÓN SOPORTADAS:
 
@@ -488,6 +495,19 @@ class AIEditorController {
             }
 
             console.log(`🔧 AIEditorController: ModifyDiagram - "${prompt}" (mode: ${mode})`);
+            console.log(`📊 AIEditorController: Estado recibido - Nodos: ${curNodes.length}, Relaciones: ${curEdges.length}`);
+            console.log('📋 AIEditorController: Nodos actuales:', curNodes.map(n => ({ 
+                id: n.id, 
+                name: n.data?.className || n.name,
+                attributes: n.data?.attributes?.length || 0,
+                methods: n.data?.methods?.length || 0
+            })));
+            console.log('🔗 AIEditorController: Relaciones actuales:', curEdges.map(e => ({
+                id: e.id,
+                source: e.source,
+                target: e.target,
+                type: e.data?.type || e.type
+            })));
 
             // Preparar el estado actual del diagrama para el contexto de la IA
             const currentState = {
@@ -542,7 +562,16 @@ class AIEditorController {
                     aiPrompt += `\n`;
                 }
                 
-                aiPrompt += `Aplica los cambios solicitados manteniendo todos los elementos no mencionados. Si necesitas aclaración, usa 'clarifyingQuestions'.`;
+                aiPrompt += `
+🎯 INSTRUCCIONES ESPECÍFICAS:
+- **PRESERVAR** todas las clases del estado actual que no se mencionen
+- **MANTENER** todos los IDs existentes (${currentState.elements.map(e => e.id).join(', ')})
+- **APLICAR** solo los cambios específicos solicitados
+- **NO DUPLICAR** elementos existentes
+- Si eliminas relaciones, mantén las clases intactas
+- Si necesitas aclaración, usa 'clarifyingQuestions'
+
+RESULTADO ESPERADO: Estado modificado basado en el estado actual, NO un diagrama completamente nuevo.`;
             }
 
             console.log('🤖 AIEditorController: Enviando prompt a IA...');

@@ -109,7 +109,10 @@ const BoardPage = () => {
       setEdges
   } = useSocketFlow(boardId, currentUser);
 
-      const navigate = useNavigate();
+  const navigate = useNavigate();
+  
+  // Estado para controlar modificaciones de IA
+  const [aiModificationActive, setAiModificationActive] = useState(false);
 
   const ActiveUsers = ({ users }) => (
     <div className="flex flex-wrap gap-2">
@@ -1467,6 +1470,7 @@ const BoardPage = () => {
         setNodes={setNodes}
         setEdges={setEdges}
         updateBoardData={updateBoardData}
+        onAiModificationChange={setAiModificationActive}
       />
 
       <BurbujaHerramientasDiagrama
