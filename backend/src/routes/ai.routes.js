@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import AIController from '../controllers/ai.controller.js';
 import AIImageController from '../controllers/ai.image.controller.js';
+import AIEditorController from '../controllers/ai.editor.controller.js';
 
 const router = express.Router();
 
@@ -104,8 +105,11 @@ router.post('/verify-diagram', async (req, res, next) => {
 });
 router.get('/features', AIController.getAIFeatures);
 
-// Dry-run modify: accepts current nodes/edges + prompt and returns a proposed merged state (does not apply changes)
-router.post('/modify-diagram', handleMultipleFormats, AIController.modifyDiagram);
+// Diagram editing: accepts current nodes/edges + prompt and returns a modified state
+router.post('/modify-diagram', handleMultipleFormats, AIEditorController.modifyDiagram);
+
+// Get editor features and capabilities
+router.get('/editor/features', AIEditorController.getEditorFeatures);
 
 // Health check for AI service
 router.get('/health', (req, res) => {
