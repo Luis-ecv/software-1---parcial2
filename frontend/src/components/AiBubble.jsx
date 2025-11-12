@@ -1,6 +1,60 @@
 import { useState, useRef, useEffect } from 'react';
 import { generateDiagram, modifyDiagram } from '../utils/aiService';
 
+// Parse cardinality string and extract startLabel and endLabel
+const parseCardinality = (cardinality) => {
+  if (!cardinality || typeof cardinality !== 'string') {
+    return { startLabel: null, endLabel: null };
+  }
+
+  // Handle common cardinality formats:
+  // "1" -> both sides are "1"
+  // "1:*" -> start="1", end="*"
+  // "1..*" -> start="1", end="*"
+  // "1..n" -> start="1", end="n"
+  // "0..1:1..*" -> start="0..1", end="1..*"
+  // "1 — *" -> start="1", end="*"
+
+  let startLabel = null;
+  let endLabel = null;
+
+  // Clean the cardinality string
+  const cleaned = cardinality.trim()
+    .replace(/\s*—\s*|\s*-\s*|\s*to\s*/gi, ':')  // Replace dashes and "to" with colon
+    .replace(/\s+/g, '');  // Remove spaces
+
+  // Check for colon separator
+  if (cleaned.includes(':')) {
+    const parts = cleaned.split(':');
+    startLabel = parts[0] || null;
+    endLabel = parts[1] || null;
+  } else {
+    // Single cardinality value - apply to both sides
+    startLabel = cleaned;
+    endLabel = cleaned;
+  }
+
+  // Normalize common patterns
+  const normalize = (label) => {
+    if (!label) return null;
+    
+    // Convert patterns to standard notation
+    label = label
+      .replace(/\bn\b/gi, '*')  // n -> *
+      .replace(/\.\.many/gi, '..*')  // ..many -> ..*
+      .replace(/\.\.(\*|n)/gi, '..*')  // ..* or ..n -> ..*
+      .replace(/^(\d+)\.\.(\*|\d+)$/gi, '$1..$2')  // Ensure proper format
+      .replace(/^(\*|\d+)$/gi, '$1');  // Single values
+
+    return label === '' ? null : label;
+  };
+
+  return {
+    startLabel: normalize(startLabel),
+    endLabel: normalize(endLabel)
+  };
+};
+
 // Minimal AI Bubble component: floating FAB -> panel with input + history
 export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, updateBoardData }) {
   const [open, setOpen] = useState(false);
@@ -151,6 +205,10 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
           return null;
         }
 
+        // Procesar cardinalidad para extraer startLabel y endLabel
+        const cardinality = rel && (rel.cardinality || rel.card) ? rel.cardinality || rel.card : null;
+        const cardinalityData = parseCardinality(cardinality);
+
         return {
           id,
           source,
@@ -158,7 +216,9 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
           type: 'umlEdge',
           data: {
             type: (rel && (rel.type || rel.relation)) || 'association',
-            cardinality: rel && (rel.cardinality || rel.card) ? rel.cardinality || rel.card : null,
+            cardinality,
+            startLabel: cardinalityData.startLabel,
+            endLabel: cardinalityData.endLabel,
             _aiSource: true,
             _raw: rel
           }
@@ -637,6 +697,9 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
                                       type: 'umlEdge',
                                       data: {
                                         type: edge.data?.type || 'Association',
+                                        cardinality: edge.data?.cardinality,
+                                        startLabel: edge.data?.startLabel,
+                                        endLabel: edge.data?.endLabel,
                                         _aiModified: true
                                       }
                                     }));
@@ -779,6 +842,9 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
                                             type: 'umlEdge',
                                             data: {
                                               type: edge.data?.type || 'Association',
+                                              cardinality: edge.data?.cardinality,
+                                              startLabel: edge.data?.startLabel,
+                                              endLabel: edge.data?.endLabel,
                                               _aiModified: true
                                             }
                                           }));
