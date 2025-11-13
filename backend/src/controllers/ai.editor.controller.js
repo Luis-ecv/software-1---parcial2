@@ -74,6 +74,19 @@ OBJETIVO: Modificar un diagrama UML existente basándote en las instrucciones de
    - "quita la herencia de ClaseHija a ClasePadre"
    - "borra todas las relaciones de ClaseX"
 
+🏗️ **CREAR CLASE DE ASOCIACIÓN**:
+   - "crea una clase de asociación entre ClaseA y ClaseB"
+   - "añade clase intermedia entre Cliente y Producto"
+   - "cambia la cardinalidad de Clase1 a Clase2 a muchos a muchos" (genera clase de asociación)
+   - "establece relación *:* entre Usuario y Proyecto" (genera clase de asociación)
+   
+   📋 **Comportamiento para Clases de Asociación**:
+   - **Nombre**: Combina nombres de clases (ej: "ClienteProducto", "UsuarioProyecto")
+   - **Posición**: En el punto medio entre las dos clases originales
+   - **Atributos**: Incluye "id: string" y "fechaCreacion: Date"
+   - **Relaciones**: Crea dos asociaciones simples hacia la nueva clase
+   - **Elimina**: La relación directa original (si existe)
+
 ⚠️ **TIPOS DE RELACIÓN VÁLIDOS:**
    - Association|Asociación (por defecto)
    - Aggregation|Agregación
@@ -279,6 +292,11 @@ class AIEditorController {
             deleteRelation: [
                 /(?:elimina|quita|borra)\s+(?:la\s+)?relaci[oó]n\s+entre\s+([a-zA-Z0-9_]+)\s+y\s+([a-zA-Z0-9_]+)/gi,
                 /(?:elimina|quita)\s+(?:la\s+)?([a-zA-Z\sóéíúñ]+)\s+(?:de|entre)\s+([a-zA-Z0-9_]+)\s+(?:a|y)\s+([a-zA-Z0-9_]+)/gi
+            ],
+            associationClass: [
+                /(?:crea|añade|agrega)\s+(?:una\s+)?clase\s+de\s+asociaci[oó]n\s+entre\s+([a-zA-Z0-9_]+)\s+y\s+([a-zA-Z0-9_]+)/gi,
+                /(?:clase|nodo)\s+(?:de\s+)?(?:asociaci[oó]n|intermedi[ao])\s+entre\s+([a-zA-Z0-9_]+)\s+y\s+([a-zA-Z0-9_]+)/gi,
+                /(?:cambia|modifica|establece)\s+(?:la\s+)?cardinalidad\s+(?:de|entre)\s+([a-zA-Z0-9_]+)\s+(?:a|y)\s+([a-zA-Z0-9_]+)\s+(?:a|como)\s+(?:muchos\s+a\s+muchos|\*:\*|m:n|n:m|many\s+to\s+many)/gi
             ]
         };
 
@@ -288,18 +306,33 @@ class AIEditorController {
             targetClass: null,
             newType: null,
             newCardinality: null,
-            relationId: null
+            relationId: null,
+            associationClassName: null
         };
 
-        // Check for type changes
-        for (const pattern of patterns.typeChange) {
+        // Check for association class creation first (highest priority)
+        for (const pattern of patterns.associationClass) {
             const match = pattern.exec(lowerPrompt);
             if (match) {
-                result.operation = 'changeType';
+                result.operation = 'createAssociationClass';
                 result.sourceClass = match[1];
-                result.targetClass = match[2] || match[1]; // If only one class mentioned, it's both
-                result.newType = AIEditorController.normalizeRelationshipType(match[3] || match[2]);
+                result.targetClass = match[2];
+                result.associationClassName = AIEditorController.generateAssociationClassName(match[1], match[2]);
                 break;
+            }
+        }
+
+        // Check for type changes
+        if (!result.operation) {
+            for (const pattern of patterns.typeChange) {
+                const match = pattern.exec(lowerPrompt);
+                if (match) {
+                    result.operation = 'changeType';
+                    result.sourceClass = match[1];
+                    result.targetClass = match[2] || match[1]; // If only one class mentioned, it's both
+                    result.newType = AIEditorController.normalizeRelationshipType(match[3] || match[2]);
+                    break;
+                }
             }
         }
 
@@ -363,6 +396,142 @@ class AIEditorController {
         }
 
         return result;
+    }
+
+    // Create association class directly without AI
+    static createAssociationClassDirectly(relationshipInfo, currentState, salaId) {
+        try {
+            const { sourceClass, targetClass, associationClassName } = relationshipInfo;
+            
+            // Find source and target classes in current state
+            const sourceElement = currentState.elements.find(el => 
+                el.id.toLowerCase().includes(sourceClass.toLowerCase()) || 
+                el.name.toLowerCase().includes(sourceClass.toLowerCase())
+            );
+            const targetElement = currentState.elements.find(el => 
+                el.id.toLowerCase().includes(targetClass.toLowerCase()) || 
+                el.name.toLowerCase().includes(targetClass.toLowerCase())
+            );
+            
+            if (!sourceElement || !targetElement) {
+                return { success: false, error: 'Source or target class not found' };
+            }
+            
+            // Calculate midpoint position
+            const midX = (sourceElement.position.x + targetElement.position.x) / 2;
+            const midY = (sourceElement.position.y + targetElement.position.y) / 2;
+            
+            // Generate unique ID for association class
+            const assocId = `assoc_${sourceElement.id}_${targetElement.id}_${Date.now()}`;
+            
+            // Create association class
+            const associationClass = {
+                id: assocId,
+                type: 'classNode',
+                position: { x: midX, y: midY },
+                data: {
+                    className: associationClassName,
+                    attributes: ['id: string', 'fechaCreacion: Date'],
+                    methods: [],
+                    _aiModified: true
+                }
+            };
+            
+            // Create new relationships
+            const rel1Id = `rel_${sourceElement.id}_${assocId}_${Date.now()}`;
+            const rel2Id = `rel_${assocId}_${targetElement.id}_${Date.now() + 1}`;
+            
+            const relationship1 = {
+                id: rel1Id,
+                sourceId: sourceElement.id,
+                targetId: assocId,
+                type: 'Association',
+                cardinality: null
+            };
+            
+            const relationship2 = {
+                id: rel2Id,
+                sourceId: assocId,
+                targetId: targetElement.id,
+                type: 'Association',
+                cardinality: null
+            };
+            
+            // Find and remove existing direct relationship if any
+            const existingRelIndex = currentState.relationships.findIndex(rel => 
+                (rel.sourceId === sourceElement.id && rel.targetId === targetElement.id) ||
+                (rel.sourceId === targetElement.id && rel.targetId === sourceElement.id)
+            );
+            
+            // Build new state
+            const newElements = [...currentState.elements, associationClass];
+            const newRelationships = [...currentState.relationships];
+            
+            let removedRelations = [];
+            if (existingRelIndex !== -1) {
+                removedRelations = [newRelationships[existingRelIndex].id];
+                newRelationships.splice(existingRelIndex, 1);
+            }
+            
+            newRelationships.push(relationship1, relationship2);
+            
+            // Convert to frontend format
+            const resultNodes = newElements.map(el => ({
+                id: el.id,
+                type: 'classNode',
+                position: el.position,
+                data: {
+                    className: el.name,
+                    attributes: Array.isArray(el.attributes) ? el.attributes : [],
+                    methods: Array.isArray(el.methods) ? el.methods : [],
+                    _aiModified: true
+                }
+            }));
+            
+            const resultEdges = newRelationships.map(rel => {
+                const cardinalityData = AIEditorController.parseCardinality(rel.cardinality);
+                return {
+                    id: `edge_${rel.id}_${Date.now()}`,
+                    source: rel.sourceId,
+                    target: rel.targetId,
+                    type: 'umlEdge',
+                    data: {
+                        type: rel.type || 'Association',
+                        cardinality: rel.cardinality,
+                        startLabel: cardinalityData.startLabel,
+                        endLabel: cardinalityData.endLabel,
+                        _aiModified: true
+                    }
+                };
+            });
+            
+            return {
+                success: true,
+                newState: {
+                    nodes: resultNodes,
+                    edges: resultEdges
+                },
+                modifications: {
+                    added: [assocId, rel1Id, rel2Id],
+                    modified: [],
+                    removed: removedRelations
+                }
+            };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    }
+
+    // Generate association class name from two class names
+    static generateAssociationClassName(class1, class2) {
+        // Clean class names and capitalize first letters
+        const cleanName1 = class1.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+        const cleanName2 = class2.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+        
+        // Capitalize first letters
+        const capitalize = (str) => str.charAt(0).toUpperCase() + str.slice(1);
+        
+        return capitalize(cleanName1) + capitalize(cleanName2);
     }
 
     // Parse cardinality string and extract startLabel and endLabel
@@ -494,20 +663,7 @@ class AIEditorController {
                 });
             }
 
-            console.log(`🔧 AIEditorController: ModifyDiagram - "${prompt}" (mode: ${mode})`);
-            console.log(`📊 AIEditorController: Estado recibido - Nodos: ${curNodes.length}, Relaciones: ${curEdges.length}`);
-            console.log('📋 AIEditorController: Nodos actuales:', curNodes.map(n => ({ 
-                id: n.id, 
-                name: n.data?.className || n.name,
-                attributes: n.data?.attributes?.length || 0,
-                methods: n.data?.methods?.length || 0
-            })));
-            console.log('🔗 AIEditorController: Relaciones actuales:', curEdges.map(e => ({
-                id: e.id,
-                source: e.source,
-                target: e.target,
-                type: e.data?.type || e.type
-            })));
+
 
             // Preparar el estado actual del diagrama para el contexto de la IA
             const currentState = {
@@ -530,8 +686,29 @@ class AIEditorController {
             // Analizar el prompt para detectar operaciones específicas de relaciones
             const relationshipInfo = AIEditorController.extractRelationshipInfo(prompt, currentState.relationships);
             
-            if (relationshipInfo.operation) {
-                console.log(`🔍 AIEditorController: Operación de relación detectada:`, relationshipInfo);
+            // Manejar creación de clases de asociación automáticamente
+            if (relationshipInfo.operation === 'createAssociationClass') {
+                const result = AIEditorController.createAssociationClassDirectly(
+                    relationshipInfo, 
+                    currentState, 
+                    salaId
+                );
+                
+                if (result.success) {
+                    return res.status(200).json({
+                        success: true,
+                        message: `Clase de asociación "${relationshipInfo.associationClassName}" creada entre ${relationshipInfo.sourceClass} y ${relationshipInfo.targetClass}.`,
+                        newState: result.newState,
+                        modifications: result.modifications,
+                        relationshipOperation: {
+                            operation: relationshipInfo.operation,
+                            sourceClass: relationshipInfo.sourceClass,
+                            targetClass: relationshipInfo.targetClass,
+                            associationClassName: relationshipInfo.associationClassName
+                        }
+                    });
+                }
+                // Si falla el procesamiento directo, continúa con IA
             }
 
             // Construir el prompt contextual para la IA
@@ -559,6 +736,17 @@ class AIEditorController {
                     if (relationshipInfo.relationId) {
                         aiPrompt += `🆔 RELACIÓN IDENTIFICADA: ${relationshipInfo.relationId}\n`;
                     }
+                    
+                    // Instrucciones especiales para clases de asociación
+                    if (relationshipInfo.operation === 'createAssociationClass') {
+                        aiPrompt += `🏗️ CREAR CLASE DE ASOCIACIÓN:\n`;
+                        aiPrompt += `   - Nombre: "${relationshipInfo.associationClassName}"\n`;
+                        aiPrompt += `   - Atributos: ["id: string", "fechaCreacion: Date"]\n`;
+                        aiPrompt += `   - Posición: En el punto medio entre ${relationshipInfo.sourceClass} y ${relationshipInfo.targetClass}\n`;
+                        aiPrompt += `   - Crear asociaciones: ${relationshipInfo.sourceClass} → ${relationshipInfo.associationClassName} y ${relationshipInfo.associationClassName} → ${relationshipInfo.targetClass}\n`;
+                        aiPrompt += `   - Eliminar relación directa si existe\n`;
+                    }
+                    
                     aiPrompt += `\n`;
                 }
                 
@@ -574,7 +762,7 @@ class AIEditorController {
 RESULTADO ESPERADO: Estado modificado basado en el estado actual, NO un diagrama completamente nuevo.`;
             }
 
-            console.log('🤖 AIEditorController: Enviando prompt a IA...');
+
 
             // Llamar a la IA para procesar la modificación
             const fullPrompt = `${EDITOR_SYSTEM_PROMPT}\n\n${aiPrompt}`;
@@ -604,7 +792,7 @@ RESULTADO ESPERADO: Estado modificado basado en el estado actual, NO un diagrama
                 }
             }
 
-            console.log('🎯 AIEditorController: Respuesta de IA procesada correctamente');
+
 
             // Verificar si la IA necesita aclaración
             if (aiResponse.clarifyingQuestions && Array.isArray(aiResponse.clarifyingQuestions) && aiResponse.clarifyingQuestions.length > 0) {
@@ -678,7 +866,7 @@ RESULTADO ESPERADO: Estado modificado basado en el estado actual, NO un diagrama
                 }
             }
 
-            console.log(`✅ AIEditorController: Resultado - Nodos: ${resultNodes.length}, Relaciones: ${resultEdges.length}`);
+
 
             // Construir mensaje específico basado en la operación detectada
             let responseMessage = `Modificación aplicada correctamente.`;
@@ -696,6 +884,9 @@ RESULTADO ESPERADO: Estado modificado basado en el estado actual, NO un diagrama
                         break;
                     case 'delete':
                         responseMessage = `Relación eliminada entre ${relationshipInfo.sourceClass} y ${relationshipInfo.targetClass}.`;
+                        break;
+                    case 'createAssociationClass':
+                        responseMessage = `Clase de asociación "${relationshipInfo.associationClassName}" creada entre ${relationshipInfo.sourceClass} y ${relationshipInfo.targetClass}.`;
                         break;
                     default:
                         responseMessage = `Modificación de relación aplicada entre ${relationshipInfo.sourceClass || ''} y ${relationshipInfo.targetClass || ''}.`;

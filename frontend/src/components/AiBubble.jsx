@@ -128,6 +128,14 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
       "elimina la relación entre ClaseX y ClaseY",
       "quita la herencia de SubClase a SuperClase"
     ],
+    "Clases de Asociación": [
+      "crea una clase de asociación entre Estudiante y Curso",
+      "añade clase intermedia entre Cliente y Producto",
+      "genera clase de asociación entre Usuario y Proyecto",
+      "cambia la cardinalidad de Empleado a Departamento a muchos a muchos",
+      "establece relación *:* entre Médico y Paciente",
+      "crea nodo intermedio entre Persona y Empresa"
+    ],
     "Operaciones Complejas": [
       "elimina clase Temporal y redirige sus relaciones a ClasePrincipal",
       "renombra Usuario a Cliente y añade atributo telefono: string",
@@ -169,12 +177,7 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
     setEditedDiagram(copy);
   }, [mode, messages]);
 
-  // Debug: Monitor changes in nodes and edges props
-  useEffect(() => {
-    console.log('🔄 AiBubble: Props changed - nodes:', nodes?.length || 0, 'edges:', edges?.length || 0);
-    console.log('🔍 AiBubble: Current nodes:', nodes);
-    console.log('🔍 AiBubble: Current edges:', edges);
-  }, [nodes, edges]);
+
 
   // Helper to normalize attributes/methods to string array to avoid React rendering objects
   const normalizeStringArray = (maybeArr) => {
@@ -380,7 +383,9 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
         'modifica', 'cambiar', 'cambio', 'editar', 'edita', 'actualizar', 
         'actualiza', 'modificar', 'alterar', 'corregir', 'corrige', 'ajustar',
         'ajusta', 'reemplazar', 'reemplaza', 'sustituir', 'sustituye', 
-        'elimina', 'eliminar', 'borrar', 'borra', 'quitar', 'quita', 'remover', 'remeve'
+        'elimina', 'eliminar', 'borrar', 'borra', 'quitar', 'quita', 'remover', 'remeve',
+        'clase de asociacion', 'clase de asociación', 'clase intermedia', 'nodo intermedio',
+        'muchos a muchos', 'many to many'
       ];
       
       const isModification = mode === 'edit' || 
@@ -392,13 +397,7 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
       let res;
       if (isModification) {
         // Use modify diagram for edits
-        console.log('🔍 AiBubble: Enviando modificación con estado actual:', {
-          nodesCount: (nodes || []).length,
-          edgesCount: (edges || []).length,
-          prompt: text,
-          nodes: nodes || [],
-          edges: edges || []
-        });
+
         
         res = await modifyDiagram({ 
           nodes: nodes || [], 
@@ -425,24 +424,13 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
       if (isModification && res.newState) {
         // modifyDiagram returns newState with nodes and edges
         // For modifications, we need to replace the entire board state, not merge
-        console.log('🔄 AiBubble: Applying AI modification result', res.newState);
-        
         // Set flag to prevent WebSocket conflicts during AI modifications
         setAiModificationInProgress(true);
         if (onAiModificationChange) onAiModificationChange(true);
         
-        console.log('📝 AiBubble: Estado antes de modificación:', {
-          currentNodes: nodes?.length || 0,
-          currentEdges: edges?.length || 0,
-          newNodes: res.newState.nodes?.length || 0,
-          newEdges: res.newState.edges?.length || 0
-        });
-        
         // Apply changes to local state immediately with protection
         const newNodes = res.newState.nodes || [];
         const newEdges = res.newState.edges || [];
-        
-        console.log('🛡️ AiBubble: Aplicando cambios protegidos contra WebSocket');
         
         // Apply changes multiple times to ensure they stick
         const applyChanges = () => {
@@ -460,7 +448,6 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
         // Sync with server after local changes are established
         setTimeout(() => {
           if (updateBoardData && boardId) {
-            console.log('💾 AiBubble: Sincronizando estado final con servidor');
             updateBoardData({
               nodes: newNodes,
               edges: newEdges
@@ -471,7 +458,6 @@ export default function AiBubble({ boardId, nodes, edges, setNodes, setEdges, up
           setTimeout(() => {
             setAiModificationInProgress(false);
             if (onAiModificationChange) onAiModificationChange(false);
-            console.log('✅ AiBubble: Modificación de IA completada, protección removida');
           }, 100);
         }, 800); // Longer delay to ensure local state is solid
         
